@@ -1,0 +1,12 @@
+node_modules
+dist
+*.tgz
+
+# local Claude Code config (personal skills/settings)
+.claude/
+
+# local test songs (copyrighted - never commit)
+test-music/
+
+# local-only benchmark tooling (uses test-music/)
+bench/
