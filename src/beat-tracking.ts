@@ -10,14 +10,21 @@ export type BeatTrackingOptions = Readonly<{
   bassEnvelope?: Float32Array;
   /** Harmonic flux; chord changes concentrate on downbeats. */
   harmonicEnvelope?: Float32Array;
+  /** Midrange flux; snares land here, which the octave resolver uses with the bass band. */
+  midEnvelope?: Float32Array;
   tightness?: number;
 }>;
+
+/** One reading of the tempo at a different metrical level, ranked by how well it fits. */
+export type TempoAlternative = Readonly<{ bpm: number; score: number }>;
 
 export type BeatTrackingResult = Readonly<{
   bpm: number | null;
   confidence: number;
   beats: readonly BeatMarker[];
   candidates: readonly TempoCandidate[];
+  /** The chosen tempo first, then its half/double readings; lets apps offer a speed override. */
+  alternatives: readonly TempoAlternative[];
   meter: number;
 }>;
 
@@ -248,6 +255,87 @@ function estimateMeter(accents: readonly number[]): Readonly<{ meter: number; ph
   return { meter: 4, phase: quadruple.phase };
 }
 
+function normalizedByMean(envelope: Float32Array): Float32Array {
+  const mean = meanOf(envelope);
+  return Float32Array.from(envelope, (value) => value / mean);
+}
+
+/**
+ * Off-beat to on-beat energy at a candidate beat period. Each window picks its own best phase,
+ * so slow drift does not smear the comb. Near 1 means the half-beats are as busy as the beats
+ * (the period is two real beats); near 0 means the half-beats are empty (the period is right).
+ */
+export function offbeatRatio(envelope: Float32Array, lagFrames: number, windowFrames: number): number {
+  const peak = (frame: number) => {
+    const center = Math.round(frame);
+    let value = 0;
+    for (let offset = -2; offset <= 2; offset += 1) value = Math.max(value, envelope[center + offset] ?? 0);
+    return value;
+  };
+  const span = Math.max(windowFrames, lagFrames * 4);
+  let offbeat = 0;
+  let onbeat = 0;
+  for (let start = 0; start + span <= envelope.length; start += span / 2) {
+    let bestSum = -1;
+    let bestPhase = 0;
+    for (let phase = 0; phase < lagFrames; phase += 1) {
+      let sum = 0;
+      for (let frame = start + phase; frame < start + span; frame += lagFrames) sum += peak(frame);
+      if (sum > bestSum) {
+        bestSum = sum;
+        bestPhase = phase;
+      }
+    }
+    let sum = 0;
+    for (let frame = start + bestPhase + lagFrames / 2; frame < start + span; frame += lagFrames) sum += peak(frame);
+    offbeat += sum;
+    onbeat += bestSum;
+  }
+  return onbeat > Number.EPSILON ? offbeat / onbeat : 0;
+}
+
+/** Off-beat ratio where the slower reading becomes as likely as the faster one. */
+const OCTAVE_RATIO_THRESHOLD = 0.66;
+const OCTAVE_EVIDENCE_WEIGHT = 8;
+const OCTAVE_PRIOR_WEIGHT = 0.5;
+
+/**
+ * Autocorrelation cannot tell a tempo from its double: both repeat. Kicks and snares can. At
+ * the real beat they fill the beats and leave the half-beats light; at half speed the snares
+ * land on the half-beats. Walk up the octave family from the slowest reading while the
+ * half-beats stay busy.
+ */
+function resolveOctave(
+  bestBpm: number,
+  envelope: Float32Array,
+  frameRate: number,
+  minimumBpm: number,
+  maximumBpm: number,
+): Readonly<{ bpm: number; alternatives: TempoAlternative[]; decisiveness: number }> {
+  const windowFrames = Math.round(8 * frameRate);
+  let bpm = bestBpm / 2 >= minimumBpm ? bestBpm / 2 : bestBpm;
+  const family: { bpm: number; logScore: number }[] = [{ bpm, logScore: Math.log(tempoPrior(bpm)) }];
+  let decisiveness = Infinity;
+  while (bpm * 2 <= maximumBpm) {
+    const ratio = offbeatRatio(envelope, (60 * frameRate) / bpm, windowFrames);
+    const evidence =
+      (ratio - OCTAVE_RATIO_THRESHOLD) * OCTAVE_EVIDENCE_WEIGHT +
+      OCTAVE_PRIOR_WEIGHT * Math.log(tempoPrior(bpm * 2) / tempoPrior(bpm));
+    const previous = family[family.length - 1]!;
+    family.push({ bpm: bpm * 2, logScore: previous.logScore + evidence });
+    decisiveness = Math.min(decisiveness, Math.abs(evidence));
+    if (evidence <= 0) break;
+    bpm *= 2;
+  }
+  // Softmax over the family gives comparable scores for apps that offer a half/double override.
+  const top = Math.max(...family.map((item) => item.logScore));
+  const total = family.reduce((sum, item) => sum + Math.exp(item.logScore - top), 0);
+  const alternatives = family
+    .map((item) => ({ bpm: item.bpm, score: Math.exp(item.logScore - top) / total }))
+    .sort((left, right) => (left.bpm === bpm ? -1 : right.bpm === bpm ? 1 : right.score - left.score));
+  return { bpm, alternatives, decisiveness: Number.isFinite(decisiveness) ? decisiveness : 0 };
+}
+
 export function trackBeats(
   envelope: Float32Array,
   onsets: readonly OnsetEvent[],
@@ -265,15 +353,22 @@ export function trackBeats(
   const best = candidates[0];
   const periodicity = best ? Math.min(1, best.score / Math.max(Number.EPSILON, tempoPrior(best.bpm))) : 0;
   if (!best || periodicity < 0.08 || onsets.length === 0)
-    return { bpm: null, confidence: periodicity, beats: [], candidates, meter: 4 };
+    return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], meter: 4 };
 
-  const local = smoothEnvelope(envelope, best.lagFrames / 32);
-  const beatFrames = dynamicProgrammingBeats(
-    local,
-    best.lagFrames,
-    options.tightness ?? V2_CONFIG.beat.tightness,
-  );
-  if (beatFrames.length < 2) return { bpm: null, confidence: periodicity, beats: [], candidates, meter: 4 };
+  // Kicks and snares decide the octave; fall back to the tracking envelope when bands are absent.
+  const octaveEnvelope = options.bassEnvelope
+    ? (() => {
+        const bass = normalizedByMean(options.bassEnvelope!);
+        const mid = options.midEnvelope ? normalizedByMean(options.midEnvelope) : undefined;
+        return mid ? Float32Array.from(bass, (value, index) => value + mid[index]! * 0.5) : bass;
+      })()
+    : envelope;
+  const octave = resolveOctave(best.bpm, octaveEnvelope, frameRate, minimumBpm, maximumBpm);
+  const periodFrames = (60 * frameRate) / octave.bpm;
+  const local = smoothEnvelope(envelope, periodFrames / 32);
+  const beatFrames = dynamicProgrammingBeats(local, periodFrames, options.tightness ?? V2_CONFIG.beat.tightness);
+  if (beatFrames.length < 2)
+    return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], meter: 4 };
   const rawTimes = beatFrames.map((frame) => frame * frameMs + timeOffsetMs);
   const times = extendToSongBounds(smoothBeatTimes(rawTimes), durationMs);
   const intervals = times.slice(1).map((time, index) => time - times[index]!);
@@ -292,7 +387,8 @@ export function trackBeats(
     strengths.push(strength);
   }
   const alignedRatio = strengths.filter((strength) => strength > 0.05).length / Math.max(1, strengths.length);
-  const confidence = Math.min(1, periodicity * 0.6 + alignedRatio * 0.4);
+  const octaveConfidence = 1 - Math.exp(-octave.decisiveness);
+  const confidence = Math.min(1, periodicity * 0.5 + alignedRatio * 0.3 + octaveConfidence * 0.2);
 
   const bassMean = meanOf(options.bassEnvelope);
   const harmonicMean = meanOf(options.harmonicEnvelope);
@@ -320,5 +416,5 @@ export function trackBeats(
       ...(beatInBar === 0 ? { isDownbeat: true } : {}),
     };
   });
-  return { bpm, confidence, beats, candidates, meter };
+  return { bpm, confidence, beats, candidates, alternatives: octave.alternatives, meter };
 }

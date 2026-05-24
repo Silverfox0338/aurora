@@ -64,6 +64,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
         timeOffsetMs: V2_CONFIG.onsetLatencyMs,
         bassEnvelope: spectrum.envelopes.bass,
         harmonicEnvelope: spectrum.envelopes.harmonic,
+        midEnvelope: spectrum.envelopes.midrange,
       },
     ),
   );
@@ -148,6 +149,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
     analysisSampleRate: V2_CONFIG.sampleRate,
     estimatedBpm: beatAnalysis.bpm,
     tempoConfidence: beatAnalysis.confidence,
+    tempoAlternatives: beatAnalysis.alternatives,
     meter: beatAnalysis.meter,
     spectralFrames: spectrum.frames,
     onsets,

@@ -128,6 +128,8 @@ export type V2Analysis = Readonly<{
   analysisSampleRate: number;
   estimatedBpm: number | null;
   tempoConfidence: number;
+  /** The chosen tempo first, then its half/double readings with softmax scores. */
+  tempoAlternatives: readonly Readonly<{ bpm: number; score: number }>[];
   /** Beats per bar inferred from accent periodicity (3 or 4). */
   meter?: number;
   spectralFrames: readonly SpectralFrame[];
