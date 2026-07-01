@@ -79,6 +79,40 @@ describe("V2 DSP foundations", () => {
     expect(analysis.tempoAlternatives.length).toBeGreaterThan(1);
   });
 
+  it("separates clicks into the percussive envelope and a sustained pad into the harmonic one", () => {
+    const sampleRate = 22_050;
+    const hop = 256;
+    const mono = Float32Array.from(
+      { length: sampleRate * 6 },
+      (_, index) => 0.3 * Math.sin((2 * Math.PI * 220 * index) / sampleRate) + 0.2 * Math.sin((2 * Math.PI * 330 * index) / sampleRate),
+    );
+    const clickFrames: number[] = [];
+    for (let start = sampleRate; start < mono.length - 200; start += sampleRate / 2) {
+      for (let offset = 0; offset < 40; offset += 1) mono[start + offset]! += (offset % 2 === 0 ? 0.8 : -0.8) * (1 - offset / 40);
+      clickFrames.push(start / hop);
+    }
+    const pitchRange = { minimumHz: 65, maximumHz: 1200 };
+    const { envelopes } = analyzeSpectrum(mono, sampleRate, 2048, hop, pitchRange);
+    // A click excites every frame whose 2048-sample window covers it, i.e. up to 8 hops earlier.
+    let percussiveAtClicks = 0;
+    let harmonicAtClicks = 0;
+    for (let frame = Math.ceil(sampleRate / hop); frame < envelopes.percussive.length; frame += 1)
+      if (clickFrames.some((click) => frame <= click + 2 && frame >= click - 10)) {
+        percussiveAtClicks += envelopes.percussive[frame]!;
+        harmonicAtClicks += envelopes.harmonic[frame]!;
+      }
+    expect(percussiveAtClicks).toBeGreaterThan(harmonicAtClicks * 2);
+
+    // A pad fading in is all harmonic change.
+    const swell = new Float32Array(sampleRate * 6);
+    for (let index = sampleRate * 3; index < swell.length; index += 1)
+      swell[index] =
+        0.3 * Math.sin((2 * Math.PI * 220 * index) / sampleRate) * Math.min(1, (index - sampleRate * 3) / 4000);
+    const swellEnvelopes = analyzeSpectrum(swell, sampleRate, 2048, hop, pitchRange).envelopes;
+    const sum = (values: Float32Array) => values.reduce((total, value) => total + value, 0);
+    expect(sum(swellEnvelopes.harmonic)).toBeGreaterThan(sum(swellEnvelopes.percussive) * 5);
+  });
+
   it("tracks pitch near MIDI 69 and joins stable melody frames", () => {
     expect(frequencyToMidi(440)).toBeCloseTo(69, 8);
     const raw = [0, 30, 60, 90].map((timeMs, index) => ({
@@ -96,6 +130,8 @@ describe("V2 DSP foundations", () => {
   });
 });
 
+const HAT_PARTIALS = [5_870, 6_930, 7_810, 8_420, 9_370, 10_150];
+
 /** Kick on beats 1 and 3, snare on 2 and 4, closed hats on every eighth note. */
 function drumLoop(bpm: number, seconds: number, sampleRate = 22_050): Float32Array {
   const out = new Float32Array(Math.round(seconds * sampleRate));
@@ -108,15 +144,14 @@ function drumLoop(bpm: number, seconds: number, sampleRate = 22_050): Float32Arr
   const add = (start: number, length: number, voice: (t: number) => number) => {
     for (let i = 0; i < length && start + i < out.length; i += 1) out[start + i]! += voice(i / sampleRate);
   };
-  let previousHat = 0;
+
   for (let eighth = 0; eighth * beatSamples * 0.5 < out.length; eighth += 1) {
     const start = Math.round(eighth * beatSamples * 0.5);
-    // Crude high-pass: first difference of noise keeps the hat out of the bass and mid bands.
+    // Closed hats live above 5 kHz: a cluster of inharmonic partials, like a real cymbal.
     add(start, Math.round(0.03 * sampleRate), (t) => {
-      const value = noise();
-      const hat = value - previousHat;
-      previousHat = value;
-      return hat * 0.12 * Math.exp(-t * 120);
+      let hat = 0;
+      for (const frequency of HAT_PARTIALS) hat += Math.sin(2 * Math.PI * frequency * t + frequency);
+      return (hat / HAT_PARTIALS.length) * 0.25 * Math.exp(-t * 120);
     });
     if (eighth % 2 !== 0) continue;
     const beat = eighth / 2;

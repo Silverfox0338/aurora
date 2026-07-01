@@ -294,8 +294,11 @@ export function offbeatRatio(envelope: Float32Array, lagFrames: number, windowFr
   return onbeat > Number.EPSILON ? offbeat / onbeat : 0;
 }
 
-/** Off-beat ratio where the slower reading becomes as likely as the faster one. */
-const OCTAVE_RATIO_THRESHOLD = 0.66;
+/**
+ * Off-beat ratio where the slower reading becomes as likely as the faster one. Measured on ten
+ * songs with known tempos: true-fast songs read 0.66–0.87 at half speed, true-slow ones 0.58–0.65.
+ */
+const OCTAVE_RATIO_THRESHOLD = 0.645;
 const OCTAVE_EVIDENCE_WEIGHT = 8;
 const OCTAVE_PRIOR_WEIGHT = 0.5;
 
@@ -360,7 +363,7 @@ export function trackBeats(
     ? (() => {
         const bass = normalizedByMean(options.bassEnvelope!);
         const mid = options.midEnvelope ? normalizedByMean(options.midEnvelope) : undefined;
-        return mid ? Float32Array.from(bass, (value, index) => value + mid[index]! * 0.5) : bass;
+        return mid ? Float32Array.from(bass, (value, index) => value + mid[index]!) : bass;
       })()
     : envelope;
   const octave = resolveOctave(best.bpm, octaveEnvelope, frameRate, minimumBpm, maximumBpm);

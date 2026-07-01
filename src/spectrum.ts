@@ -1,7 +1,7 @@
 import { throwIfAborted } from "./audio.ts";
 
 import { applyWindow, binForFrequency, createHannWindow, frequencyForBin, Radix2Fft } from "./fft.ts";
-import { separateSpectralFlux } from "./harmonic-percussive.ts";
+import { StreamingHpss, type HpssFlux } from "./harmonic-percussive.ts";
 import type { PitchPoint, SpectralFrame } from "./types.ts";
 
 export type OnsetEnvelopes = Readonly<{
@@ -123,6 +123,13 @@ export function analyzeSpectrum(
   }
   // Frame timestamps describe where an attack sits inside the analysis window, not the window start.
   const centerOffsetMs = (frameSize * 500) / sampleRate;
+  // Drums and tones separate well below 6 kHz; the high band keeps its own plain flux for hats.
+  const hpss = new StreamingHpss(Math.min(magnitudes.length, binForFrequency(6_000, sampleRate, frameSize) + 1));
+  const storeSeparated = (separated: HpssFlux | undefined) => {
+    if (!separated) return;
+    harmonic[separated.frame] = separated.harmonicFlux;
+    percussive[separated.frame] = separated.percussiveFlux;
+  };
 
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
     if ((frameIndex & 63) === 0) throwIfAborted(signal);
@@ -177,9 +184,7 @@ export function analyzeSpectrum(
     midrange[frameIndex] = midFlux / Math.max(1, binForFrequency(2_000, sampleRate, frameSize));
     highFrequency[frameIndex] =
       highFlux / Math.max(1, magnitudes.length - binForFrequency(2_000, sampleRate, frameSize));
-    const separated = separateSpectralFlux(broadband[frameIndex]!, harmonicity);
-    harmonic[frameIndex] = separated.harmonicFlux;
-    percussive[frameIndex] = separated.percussiveFlux;
+    storeSeparated(hpss.push(magnitudes));
     if ((frameIndex & 1) === 0) {
       const pitch = pitchFromSpectrum(
         magnitudes,
@@ -193,6 +198,7 @@ export function analyzeSpectrum(
     }
     previous.set(magnitudes);
   }
+  for (const separated of hpss.flush()) storeSeparated(separated);
   return {
     frames,
     envelopes: { broadband, bass, midrange, highFrequency, harmonic, percussive },

@@ -105,7 +105,7 @@ export type V2DebugExport = Readonly<{
     sampleRate: number;
     frameSize: number;
     hopSize: number;
-    hpssMode: "spectral-persistence-approximation";
+    hpssMode: "median-filter";
     onsetLatencyMs?: number;
   }>;
   waveform: readonly number[];

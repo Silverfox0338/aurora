@@ -119,7 +119,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
         sampleRate: V2_CONFIG.sampleRate,
         frameSize: V2_CONFIG.frameSize,
         hopSize: V2_CONFIG.hopSize,
-        hpssMode: "spectral-persistence-approximation",
+        hpssMode: "median-filter",
         onsetLatencyMs: V2_CONFIG.onsetLatencyMs,
       },
       waveform: Array.from(
