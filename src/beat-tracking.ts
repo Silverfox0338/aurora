@@ -18,6 +18,9 @@ export type BeatTrackingOptions = Readonly<{
 /** One reading of the tempo at a different metrical level, ranked by how well it fits. */
 export type TempoAlternative = Readonly<{ bpm: number; score: number }>;
 
+/** From `startMs` until the next entry, beats run at `bpm`. A steady song has one entry. */
+export type TempoMapEntry = Readonly<{ startMs: number; bpm: number }>;
+
 export type BeatTrackingResult = Readonly<{
   bpm: number | null;
   confidence: number;
@@ -25,6 +28,8 @@ export type BeatTrackingResult = Readonly<{
   candidates: readonly TempoCandidate[];
   /** The chosen tempo first, then its half/double readings; lets apps offer a speed override. */
   alternatives: readonly TempoAlternative[];
+  /** Tempo segments in time order; more than one when the song changes tempo. */
+  tempoMap: readonly TempoMapEntry[];
   meter: number;
 }>;
 
@@ -112,14 +117,151 @@ function smoothEnvelope(envelope: Float32Array, sigmaFrames: number): Float64Arr
   return output;
 }
 
-/** Ellis (2007) dynamic-programming beat tracking over a fractional beat period. */
-function dynamicProgrammingBeats(local: Float64Array, period: number, tightness: number): number[] {
+/** A stretch of the song with one beat period, in analysis frames. */
+type TempoSegment = { startFrame: number; endFrame: number; periodFrames: number };
+
+const LOCAL_WINDOW_SECONDS = 8;
+const LOCAL_HOP_SECONDS = 2;
+/** Local tempo may wander this far (as a ratio) from the global reading; beyond it is another octave. */
+const LOCAL_RANGE = 1.38;
+/** Viterbi: squared log-ratio cost for drift, and the flat cost of an abrupt tempo change. */
+const DRIFT_WEIGHT = 60;
+const JUMP_COST = 0.9;
+/** Windows within this log-ratio of a segment's median belong to it (≈4%). */
+const SEGMENT_TOLERANCE = 0.04;
+/** Six windows two seconds apart cover about 18 s: shorter stretches are fills, not tempo changes. */
+const MINIMUM_SEGMENT_WINDOWS = 6;
+/** Mean normalised periodicity a segment's own period must gain over the main period. */
+const SEGMENT_EVIDENCE = 0.15;
+
+/**
+ * Tempo changes: score every allowed period in overlapping windows, take the smoothest path
+ * through them with Viterbi, then group the path into steady segments. A song whose path never
+ * leaves one segment keeps exactly the global period, so steady songs track as before.
+ */
+function tempoSegments(envelope: Float32Array, globalPeriod: number, frameRate: number): TempoSegment[] {
+  const length = envelope.length;
+  const whole: TempoSegment[] = [{ startFrame: 0, endFrame: length, periodFrames: globalPeriod }];
+  const windowFrames = Math.round(LOCAL_WINDOW_SECONDS * frameRate);
+  const hopFrames = Math.round(LOCAL_HOP_SECONDS * frameRate);
+  if (length < windowFrames * 2) return whole;
+  const minimumLag = Math.max(2, Math.floor(globalPeriod / LOCAL_RANGE));
+  const maximumLag = Math.ceil(globalPeriod * LOCAL_RANGE);
+  const states = maximumLag - minimumLag + 1;
+  const starts: number[] = [];
+  for (let start = 0; start + windowFrames <= length; start += hopFrames) starts.push(start);
+  if (starts[starts.length - 1]! + windowFrames < length) starts.push(length - windowFrames);
+
+  const emissions = starts.map((start) => {
+    const correlation = autocorrelation(envelope.subarray(start, start + windowFrames), maximumLag * 2 + 1);
+    const scores = new Float64Array(states);
+    let peak = 0;
+    for (let state = 0; state < states; state += 1) {
+      const lag = minimumLag + state;
+      scores[state] = Math.max(0, correlation[lag] ?? 0) + 0.5 * Math.max(0, correlation[lag * 2] ?? 0);
+      peak = Math.max(peak, scores[state]!);
+    }
+    if (peak > Number.EPSILON) for (let state = 0; state < states; state += 1) scores[state]! /= peak;
+    return scores;
+  });
+
+  const cost = (from: number, to: number) => {
+    const distance = Math.log((minimumLag + to) / (minimumLag + from));
+    return Math.min(DRIFT_WEIGHT * distance * distance, JUMP_COST);
+  };
+  let score = Float64Array.from(emissions[0]!);
+  const backlinks: Int32Array[] = [];
+  for (let window = 1; window < emissions.length; window += 1) {
+    const next = new Float64Array(states);
+    const link = new Int32Array(states);
+    for (let to = 0; to < states; to += 1) {
+      let best = -Infinity;
+      let bestFrom = to;
+      for (let from = 0; from < states; from += 1) {
+        const candidate = score[from]! - cost(from, to);
+        if (candidate > best) {
+          best = candidate;
+          bestFrom = from;
+        }
+      }
+      next[to] = best + emissions[window]![to]!;
+      link[to] = bestFrom;
+    }
+    backlinks.push(link);
+    score = next;
+  }
+  const path = new Array<number>(emissions.length);
+  path[path.length - 1] = score.indexOf(Math.max(...score));
+  for (let window = path.length - 1; window > 0; window -= 1) path[window - 1] = backlinks[window - 1]![path[window]!]!;
+  const periods = path.map((state, window) => {
+    const scores = emissions[window]!;
+    const offset = state > 0 && state < states - 1 ? parabolicOffset(scores[state - 1]!, scores[state]!, scores[state + 1]!) : 0;
+    return minimumLag + state + offset;
+  });
+
+  // Greedy grouping into steady stretches, then fold short ones into the closer neighbour.
+  const groups: number[][] = [];
+  for (const [window, period] of periods.entries()) {
+    const current = groups[groups.length - 1];
+    if (current && Math.abs(Math.log(period / median(current.map((index) => periods[index]!)))) <= SEGMENT_TOLERANCE)
+      current.push(window);
+    else groups.push([window]);
+  }
+  const groupPeriod = (group: number[]) => median(group.map((index) => periods[index]!));
+  for (let index = 0; index < groups.length && groups.length > 1; ) {
+    if (groups[index]!.length >= MINIMUM_SEGMENT_WINDOWS) {
+      index += 1;
+      continue;
+    }
+    const period = groupPeriod(groups[index]!);
+    const left = groups[index - 1];
+    const right = groups[index + 1];
+    const distance = (group: number[] | undefined) =>
+      group ? Math.abs(Math.log(groupPeriod(group) / period)) : Infinity;
+    const target = distance(left) <= distance(right) ? index - 1 : index + 1;
+    groups[target] = target < index ? [...groups[target]!, ...groups[index]!] : [...groups[index]!, ...groups[target]!];
+    groups.splice(index, 1);
+    index = Math.max(0, index - 1);
+  }
+  // A segment has to earn its own tempo: across its windows, its period must fit clearly better
+  // than the song's main one. Breakdowns and intros with no steady beat fit every period about
+  // equally, so they fold back into the main tempo instead of inventing a change.
+  const stateOf = (period: number) => Math.max(0, Math.min(states - 1, Math.round(period) - minimumLag));
+  const globalState = stateOf(globalPeriod);
+  for (const group of groups) {
+    const period = groupPeriod(group);
+    if (Math.abs(Math.log(period / globalPeriod)) <= SEGMENT_TOLERANCE) continue;
+    const state = stateOf(period);
+    const advantage =
+      group.reduce((sum, window) => sum + emissions[window]![state]! - emissions[window]![globalState]!, 0) /
+      group.length;
+    if (advantage < SEGMENT_EVIDENCE) for (const window of group) periods[window] = globalPeriod;
+  }
+  // Neighbours that now agree are one segment.
+  for (let index = 1; index < groups.length; ) {
+    if (Math.abs(Math.log(groupPeriod(groups[index]!) / groupPeriod(groups[index - 1]!))) <= SEGMENT_TOLERANCE) {
+      groups[index - 1] = [...groups[index - 1]!, ...groups[index]!];
+      groups.splice(index, 1);
+    } else index += 1;
+  }
+  if (groups.length === 1) return whole;
+  const centre = (window: number) => starts[window]! + windowFrames / 2;
+  return groups.map((group, index) => ({
+    startFrame: index === 0 ? 0 : Math.round((centre(groups[index - 1]!.at(-1)!) + centre(group[0]!)) / 2),
+    endFrame: index === groups.length - 1 ? length : Math.round((centre(group.at(-1)!) + centre(groups[index + 1]![0]!)) / 2),
+    periodFrames: groupPeriod(group),
+  }));
+}
+
+/** Ellis (2007) dynamic-programming beat tracking over a per-frame fractional beat period. */
+function dynamicProgrammingBeats(local: Float64Array, periods: Float64Array, tightness: number): number[] {
   const length = local.length;
   const cumulative = new Float64Array(length);
   const backlink = new Int32Array(length).fill(-1);
-  const searchStart = Math.max(1, Math.round(period * 2));
-  const searchEnd = Math.max(1, Math.round(period / 2));
   for (let frame = 0; frame < length; frame += 1) {
+    const period = periods[frame]!;
+    const searchStart = Math.max(1, Math.round(period * 2));
+    const searchEnd = Math.max(1, Math.round(period / 2));
     let best = -Infinity;
     let bestIndex = -1;
     for (let previous = frame - searchStart; previous <= frame - searchEnd; previous += 1) {
@@ -356,7 +498,7 @@ export function trackBeats(
   const best = candidates[0];
   const periodicity = best ? Math.min(1, best.score / Math.max(Number.EPSILON, tempoPrior(best.bpm))) : 0;
   if (!best || periodicity < 0.08 || onsets.length === 0)
-    return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], meter: 4 };
+    return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], tempoMap: [], meter: 4 };
 
   // Kicks and snares decide the octave; fall back to the tracking envelope when bands are absent.
   const octaveEnvelope = options.bassEnvelope
@@ -369,12 +511,25 @@ export function trackBeats(
   const octave = resolveOctave(best.bpm, octaveEnvelope, frameRate, minimumBpm, maximumBpm);
   const periodFrames = (60 * frameRate) / octave.bpm;
   const local = smoothEnvelope(envelope, periodFrames / 32);
-  const beatFrames = dynamicProgrammingBeats(local, periodFrames, options.tightness ?? V2_CONFIG.beat.tightness);
+  const segments = tempoSegments(envelope, periodFrames, frameRate);
+  const periods = new Float64Array(envelope.length);
+  for (const segment of segments) periods.fill(segment.periodFrames, segment.startFrame, segment.endFrame);
+  const beatFrames = dynamicProgrammingBeats(local, periods, options.tightness ?? V2_CONFIG.beat.tightness);
   if (beatFrames.length < 2)
-    return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], meter: 4 };
+    return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], tempoMap: [], meter: 4 };
   const rawTimes = beatFrames.map((frame) => frame * frameMs + timeOffsetMs);
   const times = extendToSongBounds(smoothBeatTimes(rawTimes), durationMs);
   const intervals = times.slice(1).map((time, index) => time - times[index]!);
+  const tempoMap = segments.map((segment, index): TempoMapEntry => {
+    const startMs = index === 0 ? 0 : segment.startFrame * frameMs + timeOffsetMs;
+    const endMs = index === segments.length - 1 ? Infinity : segment.endFrame * frameMs + timeOffsetMs;
+    const inside = intervals.filter((_, beat) => times[beat]! >= startMs && times[beat + 1]! <= endMs);
+    return {
+      startMs: Math.round(startMs),
+      bpm: inside.length >= 3 ? 60_000 / median(inside) : (60 * frameRate) / segment.periodFrames,
+    };
+  });
+  // The median beat interval names the song's tempo: it follows where most beats sit, even when it changes.
   const bpm = 60_000 / Math.max(1, median(intervals));
 
   const strengths: number[] = [];
@@ -419,5 +574,5 @@ export function trackBeats(
       ...(beatInBar === 0 ? { isDownbeat: true } : {}),
     };
   });
-  return { bpm, confidence, beats, candidates, alternatives: octave.alternatives, meter };
+  return { bpm, confidence, beats, candidates, alternatives: octave.alternatives, tempoMap, meter };
 }

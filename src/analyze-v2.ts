@@ -150,6 +150,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
     estimatedBpm: beatAnalysis.bpm,
     tempoConfidence: beatAnalysis.confidence,
     tempoAlternatives: beatAnalysis.alternatives,
+    tempoMap: beatAnalysis.tempoMap,
     meter: beatAnalysis.meter,
     spectralFrames: spectrum.frames,
     onsets,

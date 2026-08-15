@@ -130,6 +130,8 @@ export type V2Analysis = Readonly<{
   tempoConfidence: number;
   /** The chosen tempo first, then its half/double readings with softmax scores. */
   tempoAlternatives: readonly Readonly<{ bpm: number; score: number }>[];
+  /** Tempo segments in time order: from `startMs` until the next entry, beats run at `bpm`. */
+  tempoMap: readonly Readonly<{ startMs: number; bpm: number }>[];
   /** Beats per bar inferred from accent periodicity (3 or 4). */
   meter?: number;
   spectralFrames: readonly SpectralFrame[];

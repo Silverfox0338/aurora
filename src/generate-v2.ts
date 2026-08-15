@@ -48,8 +48,17 @@ export function generateV2Chart(
     tempo: Object.freeze({
       bpmMilli: analysis.estimatedBpm === null ? null : Math.round(analysis.estimatedBpm * 1000),
       confidenceBasisPoints: Math.round(Math.max(0, Math.min(1, analysis.tempoConfidence)) * 10_000),
-      halfTimeBpmMilli: analysis.estimatedBpm === null ? null : Math.round(analysis.estimatedBpm * 500),
-      doubleTimeBpmMilli: analysis.estimatedBpm === null ? null : Math.round(analysis.estimatedBpm * 2000),
+      map: Object.freeze(
+        analysis.tempoMap.map((entry) => Object.freeze({ startMs: entry.startMs, bpmMilli: Math.round(entry.bpm * 1000) })),
+      ),
+      alternatives: Object.freeze(
+        analysis.tempoAlternatives.slice(1).map((alternative) =>
+          Object.freeze({
+            bpmMilli: Math.round(alternative.bpm * 1000),
+            scoreBasisPoints: Math.round(alternative.score * 10_000),
+          }),
+        ),
+      ),
     }),
     notes,
     ...(gimmicks.length > 0 ? { gimmicks: Object.freeze(gimmicks) } : {}),

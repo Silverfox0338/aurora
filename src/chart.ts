@@ -55,10 +55,13 @@ export type ChartGimmick =
   | Readonly<{ id: string; kind: "shuffle"; startMs: number; endMs: number; order: readonly number[] }>;
 
 export type TempoMetadata = Readonly<{
+  /** The song's main tempo (its median beat interval), in thousandths of a BPM. */
   bpmMilli: number | null;
   confidenceBasisPoints: number;
-  halfTimeBpmMilli: number | null;
-  doubleTimeBpmMilli: number | null;
+  /** Tempo segments in time order; one entry for a steady song. */
+  map: readonly Readonly<{ startMs: number; bpmMilli: number }>[];
+  /** Other metrical readings (half/double speed) with their relative likelihood, best first. */
+  alternatives: readonly Readonly<{ bpmMilli: number; scoreBasisPoints: number }>[];
 }>;
 
 export type PlayabilityDiagnostics = Readonly<{

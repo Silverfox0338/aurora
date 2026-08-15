@@ -77,7 +77,36 @@ describe("V2 DSP foundations", () => {
     expect(Math.abs(analysis.estimatedBpm! - bpm)).toBeLessThan(bpm * 0.03);
     expect(analysis.tempoAlternatives[0]!.bpm).toBeCloseTo(analysis.estimatedBpm!, -1);
     expect(analysis.tempoAlternatives.length).toBeGreaterThan(1);
-  });
+    expect(analysis.tempoMap).toHaveLength(1);
+  }, 30_000);
+
+  it("follows a step change from 120 to 150 BPM", () => {
+    const beatTimes = [
+      ...Array.from({ length: 40 }, (_, index) => index * 0.5),
+      ...Array.from({ length: 50 }, (_, index) => 20 + index * 0.4),
+    ];
+    const analysis = analyzeV2({ channels: [beatTrack(beatTimes, 40.5)], sampleRate: 22_050 });
+    expect(analysis.tempoMap).toHaveLength(2);
+    expect(analysis.tempoMap[0]!.bpm).toBeCloseTo(120, -0.5);
+    expect(analysis.tempoMap[1]!.bpm).toBeCloseTo(150, -0.5);
+    expect(Math.abs(analysis.tempoMap[1]!.startMs - 20_000)).toBeLessThan(3_000);
+    expect(beatHitRate(analysis.beats.map((beat) => beat.timeMs / 1000), beatTimes, 0.025)).toBeGreaterThan(0.9);
+  }, 30_000);
+
+  it("follows a gradual ramp from 100 to 130 BPM", () => {
+    // Tempo rises linearly over 40 s; beat n sits where the integrated tempo reaches n beats.
+    const beatTimes: number[] = [];
+    for (let time = 0, phase = 0; time < 40; time += 0.0005) {
+      const bpm = 100 + (30 * time) / 40;
+      if (phase >= beatTimes.length) beatTimes.push(time);
+      phase += (bpm / 60) * 0.0005;
+    }
+    const analysis = analyzeV2({ channels: [beatTrack(beatTimes, 40.5)], sampleRate: 22_050 });
+    expect(analysis.tempoMap.length).toBeGreaterThan(1);
+    expect(analysis.tempoMap[0]!.bpm).toBeLessThan(110);
+    expect(analysis.tempoMap.at(-1)!.bpm).toBeGreaterThan(120);
+    expect(beatHitRate(analysis.beats.map((beat) => beat.timeMs / 1000), beatTimes, 0.03)).toBeGreaterThan(0.85);
+  }, 30_000);
 
   it("separates clicks into the percussive envelope and a sustained pad into the harmonic one", () => {
     const sampleRate = 22_050;
@@ -169,4 +198,31 @@ function drumLoop(bpm: number, seconds: number, sampleRate = 22_050): Float32Arr
       );
   }
   return out;
+}
+
+/** A kick-like thump at each beat time (seconds). */
+function beatTrack(beatTimes: readonly number[], seconds: number, sampleRate = 22_050): Float32Array {
+  const out = new Float32Array(Math.round(seconds * sampleRate));
+  for (const time of beatTimes) {
+    const start = Math.round(time * sampleRate);
+    for (let i = 0; i < 0.15 * sampleRate && start + i < out.length; i += 1) {
+      const t = i / sampleRate;
+      out[start + i]! += Math.sin(2 * Math.PI * (60 + 100 * Math.exp(-t * 35)) * t) * 0.8 * Math.exp(-t * 20);
+    }
+  }
+  return out;
+}
+
+/**
+ * Share of true beats (ignoring the first and last two seconds) with a detected beat within
+ * `tolerance` seconds, after removing the detector's constant latency.
+ */
+function beatHitRate(detected: readonly number[], truth: readonly number[], tolerance: number): number {
+  const end = truth[truth.length - 1]!;
+  const inner = truth.filter((time) => time > 2 && time < end - 2);
+  const nearest = (time: number) =>
+    detected.reduce((best, candidate) => (Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best), Infinity);
+  const offsets = inner.map((time) => nearest(time) - time).sort((left, right) => left - right);
+  const latency = offsets[Math.floor(offsets.length / 2)]!;
+  return inner.filter((time) => Math.abs(nearest(time) - time - latency) <= tolerance).length / inner.length;
 }
