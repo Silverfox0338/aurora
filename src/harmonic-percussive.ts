@@ -18,6 +18,11 @@ export type HpssFlux = Readonly<{
   percussiveFlux: number;
   /** Share of this frame's energy assigned to the harmonic part, 0 to 1. */
   harmonicShare: number;
+  /**
+   * Soft harmonic mask per pooled band (0 = all drum, 1 = all tone). Shared buffer: valid only
+   * until the next push, so copy or use it straight away.
+   */
+  harmonicMask: Float32Array;
 }>;
 
 /** Median of nine values with a 19-exchange sorting network (Paeth / Devillard opt_med9). */
@@ -60,6 +65,7 @@ export class StreamingHpss {
   private readonly previousPercussive: Float32Array;
   private readonly harmonic: Float32Array;
   private readonly percussive: Float32Array;
+  private readonly mask: Float32Array;
   private pushed = 0;
 
   readonly bins: number;
@@ -82,6 +88,7 @@ export class StreamingHpss {
     this.previousPercussive = new Float32Array(bins);
     this.harmonic = new Float32Array(bins);
     this.percussive = new Float32Array(bins);
+    this.mask = new Float32Array(bins);
   }
 
   /** Push one frame of magnitudes; returns the separated flux of the frame `HPSS_DELAY_FRAMES` back. */
@@ -163,6 +170,7 @@ export class StreamingHpss {
       const p2 = percussiveEstimate * percussiveEstimate;
       const total = h2 + p2;
       const harmonicMask = total > 1e-20 ? h2 / total : 0.5;
+      this.mask[bin] = harmonicMask;
       const harmonicPart = magnitude * harmonicMask;
       // Store log-compressed parts: log is monotonic, so SuperFlux's max filter works on logs directly.
       harmonic[bin] = Math.log1p(harmonicPart * 100);
@@ -179,6 +187,7 @@ export class StreamingHpss {
       harmonicFlux,
       percussiveFlux,
       harmonicShare: totalEnergy > 1e-20 ? harmonicEnergy / totalEnergy : 0,
+      harmonicMask: this.mask,
     };
   }
 }

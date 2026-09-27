@@ -100,7 +100,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
   const events = timed("event-building", () =>
     buildMusicalEvents(onsets, beatAnalysis.beats, pitchTrack, melody, sections, {
       frames: spectrum.frames,
-      chroma: spectrum.chroma,
+      harmonicChroma: spectrum.harmonicChroma,
     }),
   );
   const hpssConfidence =

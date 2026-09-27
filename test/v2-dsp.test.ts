@@ -8,6 +8,8 @@ import { adaptiveThreshold, detectOnsets } from "../src/onset-detection.ts";
 import { buildMelodySegments, frequencyToMidi, stabilizePitchTrack } from "../src/pitch-tracking.ts";
 import { analyzeSpectrum } from "../src/spectrum.ts";
 
+import { beatHitRate, beatTrack, drumLoop } from "./synth.ts";
+
 describe("V2 DSP foundations", () => {
   it("resamples by integration instead of nearest-neighbor aliasing", () => {
     const alternating = Float32Array.from({ length: 200 }, (_, index) => (index % 2 === 0 ? 1 : -1));
@@ -158,71 +160,3 @@ describe("V2 DSP foundations", () => {
     expect(segments[0]!.midiPitch).toBeCloseTo(69, 0);
   });
 });
-
-const HAT_PARTIALS = [5_870, 6_930, 7_810, 8_420, 9_370, 10_150];
-
-/** Kick on beats 1 and 3, snare on 2 and 4, closed hats on every eighth note. */
-function drumLoop(bpm: number, seconds: number, sampleRate = 22_050): Float32Array {
-  const out = new Float32Array(Math.round(seconds * sampleRate));
-  let seed = 12_345;
-  const noise = () => {
-    seed = (seed * 1_103_515_245 + 12_345) >>> 0;
-    return (seed / 2 ** 32) * 2 - 1;
-  };
-  const beatSamples = (60 / bpm) * sampleRate;
-  const add = (start: number, length: number, voice: (t: number) => number) => {
-    for (let i = 0; i < length && start + i < out.length; i += 1) out[start + i]! += voice(i / sampleRate);
-  };
-
-  for (let eighth = 0; eighth * beatSamples * 0.5 < out.length; eighth += 1) {
-    const start = Math.round(eighth * beatSamples * 0.5);
-    // Closed hats live above 5 kHz: a cluster of inharmonic partials, like a real cymbal.
-    add(start, Math.round(0.03 * sampleRate), (t) => {
-      let hat = 0;
-      for (const frequency of HAT_PARTIALS) hat += Math.sin(2 * Math.PI * frequency * t + frequency);
-      return (hat / HAT_PARTIALS.length) * 0.25 * Math.exp(-t * 120);
-    });
-    if (eighth % 2 !== 0) continue;
-    const beat = eighth / 2;
-    if (beat % 2 === 0)
-      add(
-        start,
-        Math.round(0.18 * sampleRate),
-        (t) => Math.sin(2 * Math.PI * (55 + 90 * Math.exp(-t * 30)) * t) * 0.9 * Math.exp(-t * 18),
-      );
-    else
-      add(
-        start,
-        Math.round(0.15 * sampleRate),
-        (t) => (noise() * 0.5 + Math.sin(2 * Math.PI * 190 * t) * 0.4) * Math.exp(-t * 25),
-      );
-  }
-  return out;
-}
-
-/** A kick-like thump at each beat time (seconds). */
-function beatTrack(beatTimes: readonly number[], seconds: number, sampleRate = 22_050): Float32Array {
-  const out = new Float32Array(Math.round(seconds * sampleRate));
-  for (const time of beatTimes) {
-    const start = Math.round(time * sampleRate);
-    for (let i = 0; i < 0.15 * sampleRate && start + i < out.length; i += 1) {
-      const t = i / sampleRate;
-      out[start + i]! += Math.sin(2 * Math.PI * (60 + 100 * Math.exp(-t * 35)) * t) * 0.8 * Math.exp(-t * 20);
-    }
-  }
-  return out;
-}
-
-/**
- * Share of true beats (ignoring the first and last two seconds) with a detected beat within
- * `tolerance` seconds, after removing the detector's constant latency.
- */
-function beatHitRate(detected: readonly number[], truth: readonly number[], tolerance: number): number {
-  const end = truth[truth.length - 1]!;
-  const inner = truth.filter((time) => time > 2 && time < end - 2);
-  const nearest = (time: number) =>
-    detected.reduce((best, candidate) => (Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best), Infinity);
-  const offsets = inner.map((time) => nearest(time) - time).sort((left, right) => left - right);
-  const latency = offsets[Math.floor(offsets.length / 2)]!;
-  return inner.filter((time) => Math.abs(nearest(time) - time - latency) <= tolerance).length / inner.length;
-}

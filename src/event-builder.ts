@@ -170,7 +170,10 @@ export function buildMusicalEvents(
     const attackIndex = nearest === undefined ? -1 : attackTimes.indexOf(nearest);
     const attack = attackIndex >= 0 ? events[attackIndex]! : undefined;
     if (attack && Math.abs(attack.timeMs - note.startMs) < 55) {
-      if (attack.endTimeMs === undefined && attack.role !== "hat" && attack.role !== "snare")
+      // Melody notes often land with a snare or hat. A short note there stays a drum hit, but a
+      // held note takes the attack over, or its hold would be lost to the drum.
+      const held = note.endMs - note.startMs >= V2_CONFIG.holds.minimumDurationMs;
+      if (attack.endTimeMs === undefined && (held || (attack.role !== "hat" && attack.role !== "snare")))
         events[attackIndex] = {
           ...attack,
           endTimeMs: note.endMs,
@@ -198,7 +201,7 @@ export function buildMusicalEvents(
   if (sustain)
     events.forEach((event, index) => {
       if (!SUSTAINED_ROLES.has(event.role) || event.pitchMidi === undefined) return;
-      const endMs = spectralSustainEndMs(event.timeMs, sustain);
+      const endMs = spectralSustainEndMs(event.timeMs, event.pitchMidi, sustain);
       if (endMs !== undefined && endMs > (event.endTimeMs ?? -Infinity))
         events[index] = { ...event, endTimeMs: endMs, evidence: [...event.evidence, "spectral-sustain"] };
     });

@@ -42,13 +42,25 @@ export const V2_CONFIG = Object.freeze({
   }),
   holds: Object.freeze({
     minimumDurationMs: 420,
-    /** Measured against the recent median pitch, so vibrato stays inside one note. */
-    pitchToleranceCents: 110,
-    /** Pitch points (sampled every second hop) a sustained note may drop before it is split. */
-    maximumDroppedPoints: 4,
-    /** Spectral sustain: chroma cosine to the attack and tonal energy relative to its peak. */
-    sustainChromaSimilarity: 0.7,
-    sustainEnergyRatio: 0.3,
+    /**
+     * Measured against the recent median pitch, so vibrato stays inside one note. Below a
+     * semitone (100 cents) so a step to the neighbouring note starts a new one.
+     */
+    pitchToleranceCents: 70,
+    /**
+     * Pitch points (sampled every second hop, ≈23 ms) a sustained note may drop before it is
+     * split. Real mixes lose a held vocal for 100–150 ms at a time; a genuine repeat of the same
+     * pitch is still split by its re-attack in `sustainedHoldDuration`.
+     */
+    maximumDroppedPoints: 7,
+    /**
+     * Spectral sustain, on the drum-free chroma of the note's own pitch class: it must keep this
+     * much of its post-attack energy (0.25 ≈ −12 dB), keep this fraction of its share of all
+     * tonal energy, and start with at least `sustainMinimumShare` of it.
+     */
+    sustainEnergyRatio: 0.25,
+    sustainShareRatio: 0.5,
+    sustainMinimumShare: 0.15,
     /** Consecutive failing frames tolerated before a spectral sustain ends. */
     sustainMissFrames: 3,
   }),

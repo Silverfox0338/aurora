@@ -304,7 +304,8 @@ function assignHolds(
   const rules = DIFFICULTY_RULES[settings.difficulty];
   const candidates: Array<{ moment: Moment; durationMs: number; score: number }> = [];
   for (const moment of moments) {
-    if (moment.size !== 1) continue;
+    // A hold may share its moment with one tap; holding against two more notes is too much.
+    if (moment.size > 2) continue;
     const event = moment.events.find((item) => item.endTimeMs !== undefined) ?? moment.lead;
     const start = findEventIndex(allEvents, event.timeMs);
     const end = findEventIndex(allEvents, event.endTimeMs ?? event.timeMs);
@@ -573,7 +574,7 @@ function runBeam(
         const laneHoldEnds = [...state.laneHoldEnds];
         for (const lane of lanes) {
           laneTimes[lane] = moment.timeMs;
-          if (moment.holdMs !== undefined && lanes.length === 1)
+          if (moment.holdMs !== undefined && lane === lanes[0])
             laneHoldEnds[lane] = moment.timeMs + moment.holdMs;
         }
         const handLanes: [number, number] = [...state.handLanes];
@@ -632,7 +633,7 @@ function isPlayable(
       if (moment.timeMs - laneTimes[lane]! < minimumGapMs || moment.timeMs < holdEnds[lane]! + minimumGapMs)
         return false;
       laneTimes[lane] = moment.timeMs;
-      if (moment.holdMs !== undefined && chosen.length === 1) holdEnds[lane] = moment.timeMs + moment.holdMs;
+      if (moment.holdMs !== undefined && lane === chosen[0]) holdEnds[lane] = moment.timeMs + moment.holdMs;
     }
   }
   return true;
@@ -816,7 +817,7 @@ export function planLanes(
       const strength = Math.max(0, Math.min(1, moment.lead.strength));
       const id = `v2-${notes.length}-${moment.timeMs}-${lane}`;
       notes.push(
-        moment.holdMs !== undefined && chosen.length === 1
+        moment.holdMs !== undefined && lane === chosen[0]
           ? Object.freeze({
               id,
               kind: "hold",

@@ -84,10 +84,11 @@ export function buildMelodySegments(
     });
     group = [];
   };
-  // Vibrato swings around the note, so compare with the recent median rather than the last point.
+  // Vibrato swings around the note, so compare with the median of roughly one vibrato cycle
+  // (nine points ≈ 200 ms) rather than the last point.
   const reference = () => {
     const recent = group
-      .slice(-5)
+      .slice(-9)
       .map((point) => point.midi)
       .sort((left, right) => left - right);
     return recent[recent.length >> 1]!;

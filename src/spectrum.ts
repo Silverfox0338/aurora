@@ -1,7 +1,7 @@
 import { throwIfAborted } from "./audio.ts";
 
 import { applyWindow, binForFrequency, createHannWindow, frequencyForBin, Radix2Fft } from "./fft.ts";
-import { StreamingHpss, type HpssFlux } from "./harmonic-percussive.ts";
+import { HPSS_TIME_KERNEL, StreamingHpss, type HpssFlux } from "./harmonic-percussive.ts";
 import type { PitchPoint, SpectralFrame } from "./types.ts";
 
 export type OnsetEnvelopes = Readonly<{
@@ -19,6 +19,8 @@ export type SpectrumAnalysis = Readonly<{
   rawPitch: readonly PitchPoint[];
   /** Twelve pitch-class energies per frame, row-major; consumed by section analysis only. */
   chroma: Float32Array;
+  /** The same twelve pitch-class energies from the drum-free (harmonic) spectrum. */
+  harmonicChroma: Float32Array;
 }>;
 
 const BAND_RANGES = {
@@ -125,10 +127,37 @@ export function analyzeSpectrum(
   const centerOffsetMs = (frameSize * 500) / sampleRate;
   // Drums and tones separate well below 6 kHz; the high band keeps its own plain flux for hats.
   const hpss = new StreamingHpss(Math.min(magnitudes.length, binForFrequency(6_000, sampleRate, frameSize) + 1));
+  // Separation reports a frame a few hops late, so keep recent full-resolution spectra to mask.
+  const recent = new Float32Array(HPSS_TIME_KERNEL * magnitudes.length);
+  const harmonicMagnitudes = new Float32Array(magnitudes.length);
+  const harmonicChroma = new Float32Array(frameCount * 12);
   const storeSeparated = (separated: HpssFlux | undefined) => {
     if (!separated) return;
-    harmonic[separated.frame] = separated.harmonicFlux;
-    percussive[separated.frame] = separated.percussiveFlux;
+    const frame = separated.frame;
+    harmonic[frame] = separated.harmonicFlux;
+    percussive[frame] = separated.percussiveFlux;
+    // Pitch and tonal sustain come from the drum-free spectrum: a kick or snare under a held
+    // note no longer breaks its pitch track or inflates its loudness.
+    const offset = (frame % HPSS_TIME_KERNEL) * magnitudes.length;
+    const { harmonicMask } = separated;
+    for (let bin = 0; bin < magnitudes.length; bin += 1)
+      harmonicMagnitudes[bin] =
+        bin < hpss.sourceBins ? recent[offset + bin]! * harmonicMask[Math.floor(bin / hpss.pool)]! : 0;
+    for (let bin = 1; bin < magnitudes.length; bin += 1) {
+      const pitchClass = pitchClassForBin[bin]!;
+      if (pitchClass >= 0) harmonicChroma[frame * 12 + pitchClass]! += harmonicMagnitudes[bin]! ** 2;
+    }
+    if ((frame & 1) === 0) {
+      const pitch = pitchFromSpectrum(
+        harmonicMagnitudes,
+        (frame * hopSize * 1000) / sampleRate + centerOffsetMs,
+        sampleRate,
+        frameSize,
+        pitchRange.minimumHz,
+        pitchRange.maximumHz,
+      );
+      if (pitch) rawPitch.push(pitch);
+    }
   };
 
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
@@ -184,18 +213,8 @@ export function analyzeSpectrum(
     midrange[frameIndex] = midFlux / Math.max(1, binForFrequency(2_000, sampleRate, frameSize));
     highFrequency[frameIndex] =
       highFlux / Math.max(1, magnitudes.length - binForFrequency(2_000, sampleRate, frameSize));
+    recent.set(magnitudes, (frameIndex % HPSS_TIME_KERNEL) * magnitudes.length);
     storeSeparated(hpss.push(magnitudes));
-    if ((frameIndex & 1) === 0) {
-      const pitch = pitchFromSpectrum(
-        magnitudes,
-        frameStartMs + centerOffsetMs,
-        sampleRate,
-        frameSize,
-        pitchRange.minimumHz,
-        pitchRange.maximumHz,
-      );
-      if (pitch) rawPitch.push(pitch);
-    }
     previous.set(magnitudes);
   }
   for (const separated of hpss.flush()) storeSeparated(separated);
@@ -204,5 +223,6 @@ export function analyzeSpectrum(
     envelopes: { broadband, bass, midrange, highFrequency, harmonic, percussive },
     rawPitch,
     chroma,
+    harmonicChroma,
   };
 }
