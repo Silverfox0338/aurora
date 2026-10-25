@@ -437,12 +437,22 @@ export function offbeatRatio(envelope: Float32Array, lagFrames: number, windowFr
 }
 
 /**
- * Off-beat ratio where the slower reading becomes as likely as the faster one. Measured on ten
- * songs with known tempos: true-fast songs read 0.66–0.87 at half speed, true-slow ones 0.58–0.65.
+ * Octave decision constants, fitted on 104 songs across ~50 genres with reference tempos
+ * (90 of them octave-resolvable): 83/90 correct, on a broad plateau of nearby settings. The
+ * off-beat ratio where the slower reading becomes as likely as the faster one, and a tempo
+ * likelihood of its own (centred on 110 BPM, 0.6 octaves wide) weighed against it.
  */
-const OCTAVE_RATIO_THRESHOLD = 0.645;
+const OCTAVE_RATIO_THRESHOLD = 0.5;
 const OCTAVE_EVIDENCE_WEIGHT = 8;
-const OCTAVE_PRIOR_WEIGHT = 0.5;
+const OCTAVE_PRIOR_WEIGHT = 3;
+const OCTAVE_PRIOR_CENTER_BPM = 110;
+const OCTAVE_PRIOR_WIDTH = 0.6;
+
+/** Log-likelihood of a tempo as the felt beat. */
+function octaveLogPrior(bpm: number): number {
+  const octaves = Math.log2(bpm / OCTAVE_PRIOR_CENTER_BPM) / OCTAVE_PRIOR_WIDTH;
+  return -0.5 * octaves * octaves;
+}
 
 /**
  * Autocorrelation cannot tell a tempo from its double: both repeat. Kicks and snares can. At
@@ -458,14 +468,15 @@ function resolveOctave(
   maximumBpm: number,
 ): Readonly<{ bpm: number; alternatives: TempoAlternative[]; decisiveness: number }> {
   const windowFrames = Math.round(8 * frameRate);
-  let bpm = bestBpm / 2 >= minimumBpm ? bestBpm / 2 : bestBpm;
-  const family: { bpm: number; logScore: number }[] = [{ bpm, logScore: Math.log(tempoPrior(bpm)) }];
+  let bpm = bestBpm;
+  while (bpm / 2 >= minimumBpm) bpm /= 2;
+  const family: { bpm: number; logScore: number }[] = [{ bpm, logScore: octaveLogPrior(bpm) }];
   let decisiveness = Infinity;
   while (bpm * 2 <= maximumBpm) {
     const ratio = offbeatRatio(envelope, (60 * frameRate) / bpm, windowFrames);
     const evidence =
       (ratio - OCTAVE_RATIO_THRESHOLD) * OCTAVE_EVIDENCE_WEIGHT +
-      OCTAVE_PRIOR_WEIGHT * Math.log(tempoPrior(bpm * 2) / tempoPrior(bpm));
+      OCTAVE_PRIOR_WEIGHT * (octaveLogPrior(bpm * 2) - octaveLogPrior(bpm));
     const previous = family[family.length - 1]!;
     family.push({ bpm: bpm * 2, logScore: previous.logScore + evidence });
     decisiveness = Math.min(decisiveness, Math.abs(evidence));
