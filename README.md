@@ -46,6 +46,17 @@ chart.gimmicks; // Extreme only: timed flip / hidden / shuffle effects
 chart.quality; // playability, musicality, density, warnings
 ```
 
+### Tempo
+
+```ts
+analysis.estimatedBpm; // the song's main tempo (median beat interval)
+analysis.tempoMap; // [{ startMs, bpm }]: one entry for a steady song, more when the tempo changes
+analysis.tempoAlternatives; // [{ bpm, score }]: the chosen tempo first, then its half/double readings
+chart.tempo; // the same, in integers: { bpmMilli, confidenceBasisPoints, map, alternatives }
+```
+
+Use `tempoAlternatives` to offer a "half speed / double speed" override when the felt beat is ambiguous.
+
 `audioFingerprint` is any stable string that identifies the song. The SHA-256 hex of the audio file works well. It seeds the lane choices, so keep it stable if you want repeatable charts.
 
 `analysis` is plain, serializable data, so you can post it from a worker or cache it. Key the cache on `aurora.version` and `V2_CONFIG.sampleRate`, `frameSize`, and `hopSize`.
@@ -58,7 +69,7 @@ Everything the pipeline is built from is exported too: `analyzeSpectrum`, `detec
 
 ## Versioning
 
-`aurora.version` (`aurora-v2.5.0`) is recorded on every chart and is part of the seed. Any change that can alter output must bump `V2_VERSION` in `src/config.ts` and the package `version`, or saved charts and leaderboards stop matching.
+`aurora.version` (`aurora-v3.0.0`) is recorded on every chart and is part of the seed. Any change that can alter output must bump `V2_VERSION` in `src/config.ts` and the package `version`, or saved charts and leaderboards stop matching.
 
 ## Development
 
