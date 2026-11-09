@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The project follows [Se
 ### Breaking changes
 
 - `ChartDefinition.tempo` (`TempoMetadata`) is now `{ bpmMilli, confidenceBasisPoints, map, alternatives }`. The `halfTimeBpmMilli` / `doubleTimeBpmMilli` fields are gone; read the half/double readings from `alternatives` instead.
+- The public API drops its internal `V2` names:
+
+  | Before | After |
+  | --- | --- |
+  | `analyzeV2` / `generateV2Chart` | `analyzeAudio` / `generateChart` (or `aurora.analyze` / `aurora.generateChart`) |
+  | `V2Analysis`, `V2AnalysisConfig`, `V2DebugExport`, `isV2Analysis` | `AuroraAnalysis`, `AuroraAnalysisConfig`, `AuroraDebugExport`, `isAuroraAnalysis` |
+  | `V2_CONFIG`, `V2_VERSION`, `V2_DIFFICULTY`, `V2_FEATURE_FLAGS` | `AURORA_CONFIG`, `AURORA_VERSION`, `AURORA_DIFFICULTY`, `AURORA_FEATURE_FLAGS` |
+
+- Charts now carry `generator.algorithmId: "aurora"` (was `"v2"`), analyses `kind: "aurora-analysis"` (was `"v2-analysis"`), and note ids start with `note-`.
 - The algorithm version is now `aurora-v3.0.0`. Charts and cached analyses keyed on `aurora.version` are regenerated.
 
 ### Added

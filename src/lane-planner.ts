@@ -2,7 +2,7 @@ import { DIFFICULTY_RULES, MAX_HOLD_DURATION_MS, MIN_HOLD_DURATION_MS } from "./
 import { createDeterministicRandom } from "./prng.ts";
 import type { ChartNote, ChartSettings } from "./chart.ts";
 
-import { isAdvancedDifficulty, V2_CONFIG, V2_DIFFICULTY, type DifficultyProfile } from "./config.ts";
+import { isAdvancedDifficulty, AURORA_CONFIG, AURORA_DIFFICULTY, type DifficultyProfile } from "./config.ts";
 import { sectionAt } from "./event-builder.ts";
 import { BeatGrid } from "./grid.ts";
 import { sustainedHoldDuration } from "./holds.ts";
@@ -64,7 +64,7 @@ const LEVEL_BONUS = [0.15, 0.08, 0.03, 0];
 
 function eventPriority(event: MusicalEvent, difficulty: ChartSettings["difficulty"]): number {
   const sustained =
-    event.endTimeMs !== undefined && event.endTimeMs - event.timeMs >= V2_CONFIG.holds.minimumDurationMs
+    event.endTimeMs !== undefined && event.endTimeMs - event.timeMs >= AURORA_CONFIG.holds.minimumDurationMs
       ? 0.1
       : 0;
   const role =
@@ -318,7 +318,7 @@ function assignHolds(
     }
     if (durationMs !== undefined) endMs = Math.min(endMs, durationMs - 30);
     const length = Math.min(MAX_HOLD_DURATION_MS, Math.round(endMs - moment.timeMs));
-    if (length < Math.max(MIN_HOLD_DURATION_MS, V2_CONFIG.holds.minimumDurationMs)) continue;
+    if (length < Math.max(MIN_HOLD_DURATION_MS, AURORA_CONFIG.holds.minimumDurationMs)) continue;
     candidates.push({
       moment,
       durationMs: length,
@@ -744,7 +744,7 @@ function prepareMoments(
   settings: ChartSettings,
   durationMs: number | undefined,
 ) {
-  const profile = V2_DIFFICULTY[settings.difficulty];
+  const profile = AURORA_DIFFICULTY[settings.difficulty];
   const grid = new BeatGrid(beats);
   const removed: Removal[] = [];
   const quantized: Quantized[] = [];
@@ -815,7 +815,7 @@ export function planLanes(
     patternCounts[moment.pattern] += chosen.length;
     for (const lane of chosen) {
       const strength = Math.max(0, Math.min(1, moment.lead.strength));
-      const id = `v2-${notes.length}-${moment.timeMs}-${lane}`;
+      const id = `note-${notes.length}-${moment.timeMs}-${lane}`;
       notes.push(
         moment.holdMs !== undefined && lane === chosen[0]
           ? Object.freeze({

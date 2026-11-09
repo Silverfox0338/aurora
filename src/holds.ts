@@ -1,6 +1,6 @@
 import { MAX_HOLD_DURATION_MS } from "./chart.ts";
 
-import { V2_CONFIG } from "./config.ts";
+import { AURORA_CONFIG } from "./config.ts";
 import type { MusicalEvent, MusicalEventRole, SpectralFrame } from "./types.ts";
 
 const SUSTAINED_ROLES = new Set<MusicalEventRole>(["melody", "bass", "vocal", "harmonic"]);
@@ -17,7 +17,7 @@ export function sustainedHoldDuration(
     !SUSTAINED_ROLES.has(event.role) ||
     event.endTimeMs === undefined ||
     event.pitchMidi === undefined ||
-    (event.pitchConfidence ?? event.confidence) < V2_CONFIG.pitch.confidenceThreshold
+    (event.pitchConfidence ?? event.confidence) < AURORA_CONFIG.pitch.confidenceThreshold
   )
     return undefined;
   let endTimeMs = event.endTimeMs;
@@ -35,7 +35,7 @@ export function sustainedHoldDuration(
   );
   if (rearticulation) endTimeMs = rearticulation.timeMs - 90;
   const duration = Math.min(MAX_HOLD_DURATION_MS, Math.round(endTimeMs - event.timeMs));
-  return duration >= V2_CONFIG.holds.minimumDurationMs ? duration : undefined;
+  return duration >= AURORA_CONFIG.holds.minimumDurationMs ? duration : undefined;
 }
 
 export type SustainEvidence = Readonly<{
@@ -95,8 +95,8 @@ export function spectralSustainEndMs(
       referenceShare = share;
     }
   }
-  if (peak <= 1e-20 || referenceShare < V2_CONFIG.holds.sustainMinimumShare) return undefined;
-  const { sustainEnergyRatio, sustainShareRatio, sustainMissFrames } = V2_CONFIG.holds;
+  if (peak <= 1e-20 || referenceShare < AURORA_CONFIG.holds.sustainMinimumShare) return undefined;
+  const { sustainEnergyRatio, sustainShareRatio, sustainMissFrames } = AURORA_CONFIG.holds;
   const limit = Math.min(frames.length, start + Math.ceil(MAX_HOLD_DURATION_MS / hopMs));
   let last = start + 4;
   let misses = 0;
@@ -108,5 +108,5 @@ export function spectralSustainEndMs(
     } else if (++misses > sustainMissFrames) break;
   }
   const endMs = frames[last]!.timeMs;
-  return endMs - timeMs >= V2_CONFIG.holds.minimumDurationMs ? endMs : undefined;
+  return endMs - timeMs >= AURORA_CONFIG.holds.minimumDurationMs ? endMs : undefined;
 }

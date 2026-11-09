@@ -1,4 +1,4 @@
-import { V2_CONFIG } from "./config.ts";
+import { AURORA_CONFIG } from "./config.ts";
 import { BeatGrid } from "./grid.ts";
 import type { BeatMarker, OnsetEvent, SectionLabel, SongSection, SpectralFrame } from "./types.ts";
 
@@ -185,9 +185,9 @@ export function analyzeSections(
   const units = analysisUnits(durationMs, beats, windowMs);
   const features = unitFeatures(units, frames, chroma);
   const usingBars = beats.some((beat) => beat.isDownbeat) && units.length >= 8;
-  const kernelHalf = usingBars ? V2_CONFIG.sections.noveltyKernelBars : 2;
-  const minimumUnits = usingBars ? V2_CONFIG.sections.minimumBars : 2;
-  const maximumUnits = usingBars ? V2_CONFIG.sections.maximumBars : 4;
+  const kernelHalf = usingBars ? AURORA_CONFIG.sections.noveltyKernelBars : 2;
+  const minimumUnits = usingBars ? AURORA_CONFIG.sections.minimumBars : 2;
+  const maximumUnits = usingBars ? AURORA_CONFIG.sections.maximumBars : 4;
   const edges =
     units.length > minimumUnits * 2
       ? pickBoundaries(noveltyCurve(features.vectors, kernelHalf), minimumUnits, maximumUnits)

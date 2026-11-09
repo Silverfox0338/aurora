@@ -3,19 +3,19 @@ import { throwIfAborted } from "./audio.ts";
 
 import { prepareAnalysisChannels } from "./audio-prep.ts";
 import { trackBeats } from "./beat-tracking.ts";
-import { V2_CONFIG, V2_VERSION } from "./config.ts";
+import { AURORA_CONFIG, AURORA_VERSION } from "./config.ts";
 import { buildMusicalEvents } from "./event-builder.ts";
 import { detectOnsets } from "./onset-detection.ts";
 import { buildMelodySegments, stabilizePitchTrack } from "./pitch-tracking.ts";
 import { analyzeSections } from "./sections.ts";
 import { analyzeSpectrum } from "./spectrum.ts";
-import type { V2Analysis, V2DebugExport } from "./types.ts";
+import type { AuroraAnalysis, AuroraDebugExport } from "./types.ts";
 
 function clock(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
-export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V2Analysis {
+export function analyzeAudio(audio: DecodedAudio, context: AnalysisContext = {}): AuroraAnalysis {
   const report = context.report ?? (() => undefined);
   const stageDurationsMs: Record<string, number> = {};
   const timed = <T>(stage: string, task: () => T): T => {
@@ -28,26 +28,26 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
   throwIfAborted(context.signal);
   report({ stage: "Resampling audio", progress: 0.12 });
   const channels = timed("resampling", () =>
-    prepareAnalysisChannels(audio.channels, audio.sampleRate, V2_CONFIG.sampleRate, context.signal),
+    prepareAnalysisChannels(audio.channels, audio.sampleRate, AURORA_CONFIG.sampleRate, context.signal),
   );
   report({ stage: "Building spectrum", progress: 0.24 });
   const spectrum = timed("spectral-analysis", () =>
     analyzeSpectrum(
       channels.mono,
-      V2_CONFIG.sampleRate,
-      V2_CONFIG.frameSize,
-      V2_CONFIG.hopSize,
-      V2_CONFIG.pitch,
+      AURORA_CONFIG.sampleRate,
+      AURORA_CONFIG.frameSize,
+      AURORA_CONFIG.hopSize,
+      AURORA_CONFIG.pitch,
       context.signal,
-      V2_CONFIG.onsetLatencyMs,
+      AURORA_CONFIG.onsetLatencyMs,
     ),
   );
   throwIfAborted(context.signal);
   report({ stage: "Detecting rhythm", progress: 0.48 });
   const onsets = timed("onset-detection", () =>
-    detectOnsets(spectrum.envelopes, V2_CONFIG.sampleRate, V2_CONFIG.hopSize, {
-      ...V2_CONFIG.onset,
-      timeOffsetMs: V2_CONFIG.onsetLatencyMs,
+    detectOnsets(spectrum.envelopes, AURORA_CONFIG.sampleRate, AURORA_CONFIG.hopSize, {
+      ...AURORA_CONFIG.onset,
+      timeOffsetMs: AURORA_CONFIG.onsetLatencyMs,
     }),
   );
   report({ stage: "Tracking the beat", progress: 0.6 });
@@ -56,12 +56,12 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
       spectrum.envelopes.percussive,
       onsets,
       durationMs,
-      V2_CONFIG.sampleRate,
-      V2_CONFIG.hopSize,
-      V2_CONFIG.beat.minimumBpm,
-      V2_CONFIG.beat.maximumBpm,
+      AURORA_CONFIG.sampleRate,
+      AURORA_CONFIG.hopSize,
+      AURORA_CONFIG.beat.minimumBpm,
+      AURORA_CONFIG.beat.maximumBpm,
       {
-        timeOffsetMs: V2_CONFIG.onsetLatencyMs,
+        timeOffsetMs: AURORA_CONFIG.onsetLatencyMs,
         bassEnvelope: spectrum.envelopes.bass,
         harmonicEnvelope: spectrum.envelopes.harmonic,
         midEnvelope: spectrum.envelopes.midrange,
@@ -74,17 +74,17 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
   const pitchTrack = timed("pitch-tracking", () =>
     stabilizePitchTrack(
       spectrum.rawPitch,
-      V2_CONFIG.pitch.confidenceThreshold,
-      V2_CONFIG.pitch.continuityPenalty,
+      AURORA_CONFIG.pitch.confidenceThreshold,
+      AURORA_CONFIG.pitch.continuityPenalty,
     ),
   );
   // Pitch is sampled every second hop. Real mixes drop several voiced points inside one sung
   // or bowed note, so bridge short dropouts but only let the note ring one point past the last.
-  const pitchStepMs = (V2_CONFIG.hopSize * 2 * 1000) / V2_CONFIG.sampleRate;
+  const pitchStepMs = (AURORA_CONFIG.hopSize * 2 * 1000) / AURORA_CONFIG.sampleRate;
   const melody = buildMelodySegments(
     pitchTrack,
-    pitchStepMs * (V2_CONFIG.holds.maximumDroppedPoints + 1.5),
-    V2_CONFIG.holds.pitchToleranceCents,
+    pitchStepMs * (AURORA_CONFIG.holds.maximumDroppedPoints + 1.5),
+    AURORA_CONFIG.holds.pitchToleranceCents,
     pitchStepMs * 2.5,
   );
   report({ stage: "Building musical events", progress: 0.86 });
@@ -94,7 +94,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
       spectrum.frames,
       onsets,
       beatAnalysis.beats,
-      V2_CONFIG.sections.windowMs,
+      AURORA_CONFIG.sections.windowMs,
       spectrum.chroma,
     ),
   );
@@ -109,19 +109,19 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
       ? spectrum.frames.reduce((sum, frame) => sum + Math.abs(frame.harmonicity - 0.5) * 2, 0) /
         spectrum.frames.length
       : 0;
-  let debug: V2DebugExport | undefined;
+  let debug: AuroraDebugExport | undefined;
   if (context.debug) {
     const sampleStep = Math.max(1, Math.floor(channels.mono.length / 1200));
     const frameStep = Math.max(1, Math.floor(spectrum.envelopes.broadband.length / 1200));
     debug = {
       metadata: {
-        algorithmVersion: V2_VERSION,
+        algorithmVersion: AURORA_VERSION,
         durationMs,
-        sampleRate: V2_CONFIG.sampleRate,
-        frameSize: V2_CONFIG.frameSize,
-        hopSize: V2_CONFIG.hopSize,
+        sampleRate: AURORA_CONFIG.sampleRate,
+        frameSize: AURORA_CONFIG.frameSize,
+        hopSize: AURORA_CONFIG.hopSize,
         hpssMode: "median-filter",
-        onsetLatencyMs: V2_CONFIG.onsetLatencyMs,
+        onsetLatencyMs: AURORA_CONFIG.onsetLatencyMs,
       },
       waveform: Array.from(
         { length: Math.min(1200, Math.ceil(channels.mono.length / sampleStep)) },
@@ -144,10 +144,10 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
   }
   report({ stage: "Musical analysis complete", progress: 0.92 });
   return Object.freeze({
-    kind: "v2-analysis",
+    kind: "aurora-analysis",
     durationMs,
     sourceSampleRate: audio.sampleRate,
-    analysisSampleRate: V2_CONFIG.sampleRate,
+    analysisSampleRate: AURORA_CONFIG.sampleRate,
     estimatedBpm: beatAnalysis.bpm,
     tempoConfidence: beatAnalysis.confidence,
     tempoAlternatives: beatAnalysis.alternatives,

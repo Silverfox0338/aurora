@@ -59,17 +59,17 @@ Use `tempoAlternatives` to offer a "half speed / double speed" override when the
 
 `audioFingerprint` is any stable string that identifies the song. The SHA-256 hex of the audio file works well. It seeds the lane choices, so keep it stable if you want repeatable charts.
 
-`analysis` is plain, serializable data, so you can post it from a worker or cache it. Key the cache on `aurora.version` and `V2_CONFIG.sampleRate`, `frameSize`, and `hopSize`.
+`analysis` is plain, serializable data, so you can post it from a worker or cache it. Key the cache on `aurora.version` and `AURORA_CONFIG.sampleRate`, `frameSize`, and `hopSize`.
 
 ### Lower-level pieces
 
-Everything the pipeline is built from is exported too: `analyzeSpectrum`, `detectOnsets`, `trackBeats`, `BeatGrid`, `analyzeSections`, `buildMusicalEvents`, `planLanes`, `validateChartQuality`, `placeGimmicks`, `createDeterministicRandom`, the tuning tables `V2_CONFIG` and `V2_DIFFICULTY`, and all the types (`ChartDefinition`, `ChartNote`, `V2Analysis`, and so on).
+Everything the pipeline is built from is exported too: `analyzeSpectrum`, `detectOnsets`, `trackBeats`, `BeatGrid`, `analyzeSections`, `buildMusicalEvents`, `planLanes`, `validateChartQuality`, `placeGimmicks`, `createDeterministicRandom`, the tuning tables `AURORA_CONFIG` and `AURORA_DIFFICULTY`, and all the types (`ChartDefinition`, `ChartNote`, `AuroraAnalysis`, and so on).
 
-`ChartDefinition<Id>` takes the algorithm ids your app accepts, so `ChartDefinition<"v1" | "v2">` narrows `generator.algorithmId`. Aurora always writes `"v2"`.
+`ChartDefinition<Id>` takes the algorithm ids your app accepts, so `ChartDefinition<"aurora" | "my-generator">` narrows `generator.algorithmId`. Aurora always writes `"aurora"`.
 
 ## Versioning
 
-`aurora.version` (`aurora-v3.0.0`) is recorded on every chart and is part of the seed. Any change that can alter output must bump `V2_VERSION` in `src/config.ts` and the package `version`, or saved charts and leaderboards stop matching.
+`aurora.version` (`aurora-v3.0.0`) is recorded on every chart and is part of the seed. Any change that can alter output must bump `AURORA_VERSION` in `src/config.ts` and the package `version`, or saved charts and leaderboards stop matching.
 
 ## Development
 

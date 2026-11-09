@@ -229,6 +229,6 @@ export function repairHardConflicts(
       repaired.kind === "hold" ? repaired.timeMs + repaired.durationMs + 80 : repaired.timeMs + 55;
   }
   return accepted.map((note, index) =>
-    Object.freeze({ ...note, id: `v2-${index}-${note.timeMs}-${note.lane}` }),
+    Object.freeze({ ...note, id: `note-${index}-${note.timeMs}-${note.lane}` }),
   );
 }

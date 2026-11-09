@@ -1,8 +1,8 @@
 import type { Difficulty } from "./chart.ts";
 
-export const V2_VERSION = "aurora-v3.0.0";
+export const AURORA_VERSION = "aurora-v3.0.0";
 
-export const V2_FEATURE_FLAGS = Object.freeze({
+export const AURORA_FEATURE_FLAGS = Object.freeze({
   hpssApproximation: true,
   slides: false,
   advancedDownbeats: true,
@@ -12,7 +12,7 @@ export const V2_FEATURE_FLAGS = Object.freeze({
 const SAMPLE_RATE = 22_050;
 const FRAME_SIZE = 2048;
 
-export const V2_CONFIG = Object.freeze({
+export const AURORA_CONFIG = Object.freeze({
   sampleRate: SAMPLE_RATE,
   frameSize: FRAME_SIZE,
   hopSize: 256,
@@ -72,7 +72,7 @@ export const V2_CONFIG = Object.freeze({
   }),
 });
 
-export type V2AnalysisConfig = typeof V2_CONFIG;
+export type AuroraAnalysisConfig = typeof AURORA_CONFIG;
 
 export type DifficultyProfile = Readonly<{
   /** Notes per second at section intensity 0 and 1 before the density multiplier. */
@@ -93,7 +93,7 @@ export type DifficultyProfile = Readonly<{
   jackGapMultiplier: number | null;
 }>;
 
-export const V2_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> = Object.freeze({
+export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> = Object.freeze({
   easy: {
     notesPerSecond: [1.1, 2.3],
     peakNotesPerSecond: 4,

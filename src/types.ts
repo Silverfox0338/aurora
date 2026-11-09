@@ -98,7 +98,7 @@ export type ChartQualityReport = Readonly<{
   warnings: readonly ChartQualityWarning[];
 }>;
 
-export type V2DebugExport = Readonly<{
+export type AuroraDebugExport = Readonly<{
   metadata: Readonly<{
     algorithmVersion: string;
     durationMs: number;
@@ -121,8 +121,8 @@ export type V2DebugExport = Readonly<{
   removedCandidates: readonly Readonly<{ eventId: string; reason: string }>[];
 }>;
 
-export type V2Analysis = Readonly<{
-  kind: "v2-analysis";
+export type AuroraAnalysis = Readonly<{
+  kind: "aurora-analysis";
   durationMs: number;
   sourceSampleRate: number;
   analysisSampleRate: number;
@@ -143,9 +143,9 @@ export type V2Analysis = Readonly<{
   events: readonly MusicalEvent[];
   stageDurationsMs: Readonly<Record<string, number>>;
   hpssConfidence: number;
-  debug?: V2DebugExport;
+  debug?: AuroraDebugExport;
 }>;
 
-export function isV2Analysis(value: unknown): value is V2Analysis {
-  return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "v2-analysis";
+export function isAuroraAnalysis(value: unknown): value is AuroraAnalysis {
+  return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "aurora-analysis";
 }

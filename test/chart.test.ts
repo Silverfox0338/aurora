@@ -4,11 +4,11 @@ import { buildMusicalEvents } from "../src/event-builder.ts";
 import { planLanes } from "../src/lane-planner.ts";
 import { repairHardConflicts, validateChartQuality } from "../src/quality.ts";
 import type { BeatMarker, MusicalEvent, SongSection } from "../src/types.ts";
-import { V2_VERSION } from "../src/config.ts";
+import { AURORA_VERSION } from "../src/config.ts";
 import type { ChartSettings } from "../src/chart.ts";
 
 const settings: ChartSettings = {
-  algorithmVersion: V2_VERSION,
+  algorithmVersion: AURORA_VERSION,
   density: 1,
   difficulty: "normal",
   laneCount: 5,
@@ -45,7 +45,7 @@ function event(overrides: Partial<MusicalEvent> & Pick<MusicalEvent, "id" | "tim
   };
 }
 
-describe("V2 event and chart planning", () => {
+describe("event and chart planning", () => {
   it("keeps musical evidence separate from lane choices", () => {
     const events = buildMusicalEvents(
       [{ timeMs: 500, strength: 1, confidence: 0.9, band: "bass" }],

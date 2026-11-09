@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { analyzeV2 } from "../src/analyze-v2.ts";
-import { V2_VERSION } from "../src/config.ts";
-import { generateV2Chart } from "../src/generate-v2.ts";
+import { analyzeAudio } from "../src/analyze.ts";
+import { AURORA_VERSION } from "../src/config.ts";
+import { generateChart } from "../src/generate.ts";
 
 import { heldMelodyMix } from "./synth.ts";
 
@@ -11,9 +11,9 @@ describe.each([
   { label: "a lead over drums, pad chords and bass", accompaniment: true },
 ])("hold notes: $label", ({ accompaniment }) => {
   const { audio, notes, beatSec } = heldMelodyMix(accompaniment);
-  const analysis = analyzeV2({ channels: [audio], sampleRate: 22_050 });
-  const chart = generateV2Chart("h".repeat(64), analysis, {
-    algorithmVersion: V2_VERSION,
+  const analysis = analyzeAudio({ channels: [audio], sampleRate: 22_050 });
+  const chart = generateChart("h".repeat(64), analysis, {
+    algorithmVersion: AURORA_VERSION,
     density: 1,
     difficulty: "hard",
     laneCount: 6,

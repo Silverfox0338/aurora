@@ -1,4 +1,4 @@
-import { V2_CONFIG } from "./config.ts";
+import { AURORA_CONFIG } from "./config.ts";
 import { BeatGrid } from "./grid.ts";
 import { spectralSustainEndMs, type SustainEvidence } from "./holds.ts";
 import type {
@@ -124,7 +124,7 @@ export function buildMusicalEvents(
       : {};
   };
 
-  for (const [index, cluster] of mergeOnsets(onsets, V2_CONFIG.onsetMergeWindowMs).entries()) {
+  for (const [index, cluster] of mergeOnsets(onsets, AURORA_CONFIG.onsetMergeWindowMs).entries()) {
     const timeMs = cluster.strongest.timeMs;
     const bands = new Map<OnsetBand, number>();
     for (const onset of cluster.onsets)
@@ -172,7 +172,7 @@ export function buildMusicalEvents(
     if (attack && Math.abs(attack.timeMs - note.startMs) < 55) {
       // Melody notes often land with a snare or hat. A short note there stays a drum hit, but a
       // held note takes the attack over, or its hold would be lost to the drum.
-      const held = note.endMs - note.startMs >= V2_CONFIG.holds.minimumDurationMs;
+      const held = note.endMs - note.startMs >= AURORA_CONFIG.holds.minimumDurationMs;
       if (attack.endTimeMs === undefined && (held || (attack.role !== "hat" && attack.role !== "snare")))
         events[attackIndex] = {
           ...attack,

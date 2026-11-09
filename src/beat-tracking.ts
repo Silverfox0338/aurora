@@ -1,4 +1,4 @@
-import { V2_CONFIG } from "./config.ts";
+import { AURORA_CONFIG } from "./config.ts";
 import type { BeatMarker, OnsetEvent } from "./types.ts";
 
 export type TempoCandidate = Readonly<{ bpm: number; lagFrames: number; score: number }>;
@@ -36,7 +36,7 @@ export type BeatTrackingResult = Readonly<{
 }>;
 
 function tempoPrior(bpm: number): number {
-  const octaves = Math.log2(bpm / V2_CONFIG.beat.priorCenterBpm) / V2_CONFIG.beat.priorOctaveWidth;
+  const octaves = Math.log2(bpm / AURORA_CONFIG.beat.priorCenterBpm) / AURORA_CONFIG.beat.priorOctaveWidth;
   return Math.exp(-0.5 * octaves * octaves);
 }
 
@@ -604,7 +604,7 @@ export function trackBeats(
   const segments = tempoSegments(envelope, periodFrames, frameRate);
   const periods = new Float64Array(envelope.length);
   for (const segment of segments) periods.fill(segment.periodFrames, segment.startFrame, segment.endFrame);
-  const beatFrames = dynamicProgrammingBeats(local, periods, options.tightness ?? V2_CONFIG.beat.tightness);
+  const beatFrames = dynamicProgrammingBeats(local, periods, options.tightness ?? AURORA_CONFIG.beat.tightness);
   if (beatFrames.length < 2)
     return { bpm: null, confidence: periodicity, beats: [], candidates, alternatives: [], tempoMap: [], meter: 4 };
   const rawTimes = beatFrames.map((frame) => frame * frameMs + timeOffsetMs);

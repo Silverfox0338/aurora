@@ -1,24 +1,24 @@
 import { chartSeed, withGeneratorMetadata } from "./metadata.ts";
 import type { ChartDefinition, ChartSettings } from "./chart.ts";
 
-import { V2_VERSION } from "./config.ts";
+import { AURORA_VERSION } from "./config.ts";
 import { placeGimmicks } from "./gimmicks.ts";
 import { planLanes } from "./lane-planner.ts";
 import { repairHardConflicts, validateChartQuality } from "./quality.ts";
-import type { V2Analysis } from "./types.ts";
+import type { AuroraAnalysis } from "./types.ts";
 
 const GAP_REASONS = new Set(["off-grid", "density-budget", "hold-rest", "low-confidence"]);
 
-export function generateV2Chart(
+export function generateChart(
   audioFingerprint: string,
-  analysis: V2Analysis,
+  analysis: AuroraAnalysis,
   requestedSettings: ChartSettings,
-): ChartDefinition<"v2"> {
+): ChartDefinition<"aurora"> {
   if (requestedSettings.laneCount < 4 || requestedSettings.laneCount > 8)
     throw new Error("Lane count must be between 4 and 8");
   // The seed must be derived from the settings that are recorded on the chart.
-  const settings: ChartSettings = Object.freeze({ ...requestedSettings, algorithmVersion: V2_VERSION });
-  const seed = chartSeed(audioFingerprint, V2_VERSION, settings);
+  const settings: ChartSettings = Object.freeze({ ...requestedSettings, algorithmVersion: AURORA_VERSION });
+  const seed = chartSeed(audioFingerprint, AURORA_VERSION, settings);
   const plan = planLanes(
     analysis.events,
     analysis.beats,
@@ -71,5 +71,5 @@ export function generateV2Chart(
     }),
     quality,
   });
-  return withGeneratorMetadata(chart, "v2", V2_VERSION);
+  return withGeneratorMetadata(chart, "aurora", AURORA_VERSION);
 }

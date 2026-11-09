@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { analyzeV2 } from "../src/analyze-v2.ts";
+import { analyzeAudio } from "../src/analyze.ts";
 import { resampleAudio } from "../src/audio-prep.ts";
 import { scoreTempoCandidates, trackBeats } from "../src/beat-tracking.ts";
 import { applyWindow, binForFrequency, createHannWindow, frequencyForBin, Radix2Fft } from "../src/fft.ts";
@@ -10,7 +10,7 @@ import { analyzeSpectrum } from "../src/spectrum.ts";
 
 import { beatHitRate, beatTrack, drumLoop } from "./synth.ts";
 
-describe("V2 DSP foundations", () => {
+describe("DSP foundations", () => {
   it("resamples by integration instead of nearest-neighbor aliasing", () => {
     const alternating = Float32Array.from({ length: 200 }, (_, index) => (index % 2 === 0 ? 1 : -1));
     const result = resampleAudio(alternating, 44_100, 22_050);
@@ -74,7 +74,7 @@ describe("V2 DSP foundations", () => {
     { bpm: 172, label: "fast backbeat with eighth-note hats" },
   ])("resolves the tempo octave of a $bpm BPM $label", ({ bpm }) => {
     const audio = drumLoop(bpm, 24);
-    const analysis = analyzeV2({ channels: [audio], sampleRate: 22_050 });
+    const analysis = analyzeAudio({ channels: [audio], sampleRate: 22_050 });
     expect(analysis.estimatedBpm).not.toBeNull();
     expect(Math.abs(analysis.estimatedBpm! - bpm)).toBeLessThan(bpm * 0.03);
     expect(analysis.tempoAlternatives[0]!.bpm).toBeCloseTo(analysis.estimatedBpm!, -1);
@@ -87,7 +87,7 @@ describe("V2 DSP foundations", () => {
       ...Array.from({ length: 40 }, (_, index) => index * 0.5),
       ...Array.from({ length: 50 }, (_, index) => 20 + index * 0.4),
     ];
-    const analysis = analyzeV2({ channels: [beatTrack(beatTimes, 40.5)], sampleRate: 22_050 });
+    const analysis = analyzeAudio({ channels: [beatTrack(beatTimes, 40.5)], sampleRate: 22_050 });
     expect(analysis.tempoMap).toHaveLength(2);
     expect(analysis.tempoMap[0]!.bpm).toBeCloseTo(120, -0.5);
     expect(analysis.tempoMap[1]!.bpm).toBeCloseTo(150, -0.5);
@@ -103,7 +103,7 @@ describe("V2 DSP foundations", () => {
       if (phase >= beatTimes.length) beatTimes.push(time);
       phase += (bpm / 60) * 0.0005;
     }
-    const analysis = analyzeV2({ channels: [beatTrack(beatTimes, 40.5)], sampleRate: 22_050 });
+    const analysis = analyzeAudio({ channels: [beatTrack(beatTimes, 40.5)], sampleRate: 22_050 });
     expect(analysis.tempoMap.length).toBeGreaterThan(1);
     expect(analysis.tempoMap[0]!.bpm).toBeLessThan(110);
     expect(analysis.tempoMap.at(-1)!.bpm).toBeGreaterThan(120);
