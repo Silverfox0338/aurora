@@ -3,6 +3,29 @@
   "version": "3.0.0",
   "description": "Aurora: deterministic audio analysis and rhythm-game chart generation from decoded PCM.",
   "license": "GPL-3.0-or-later",
+  "keywords": [
+    "rhythm-game",
+    "chart-generator",
+    "beatmap",
+    "music-analysis",
+    "audio-analysis",
+    "beat-tracking",
+    "bpm-detection",
+    "tempo-detection",
+    "onset-detection",
+    "music-information-retrieval",
+    "dsp",
+    "game-development",
+    "zero-dependency"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Silverfox0338/aurora.git"
+  },
+  "homepage": "https://github.com/Silverfox0338/aurora#readme",
+  "bugs": {
+    "url": "https://github.com/Silverfox0338/aurora/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
