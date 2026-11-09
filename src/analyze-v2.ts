@@ -65,6 +65,7 @@ export function analyzeV2(audio: DecodedAudio, context: AnalysisContext = {}): V
         bassEnvelope: spectrum.envelopes.bass,
         harmonicEnvelope: spectrum.envelopes.harmonic,
         midEnvelope: spectrum.envelopes.midrange,
+        broadbandEnvelope: spectrum.envelopes.broadband,
       },
     ),
   );

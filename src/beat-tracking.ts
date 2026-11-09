@@ -12,6 +12,8 @@ export type BeatTrackingOptions = Readonly<{
   harmonicEnvelope?: Float32Array;
   /** Midrange flux; snares land here, which the octave resolver uses with the bass band. */
   midEnvelope?: Float32Array;
+  /** Full-band flux; with the tracking envelope it decides between duple and triple readings. */
+  broadbandEnvelope?: Float32Array;
   tightness?: number;
 }>;
 
@@ -455,6 +457,78 @@ function octaveLogPrior(bpm: number): number {
 }
 
 /**
+ * How sharply a beat grid at `bpm` lands on the envelope's peaks: the mean on-grid peak (best
+ * phase per 8 s window) over the envelope mean. A grid at the real tempo hits every accent;
+ * a grid at 2/3 or 3/2 of it puts half its points between them.
+ */
+export function gridContrast(envelope: Float32Array, bpm: number, frameRate: number): number {
+  const lagFrames = (60 * frameRate) / bpm;
+  const span = Math.max(Math.round(8 * frameRate), lagFrames * 4);
+  const mean = meanOf(envelope);
+  if (mean <= Number.EPSILON) return 0;
+  const peak = (frame: number) => {
+    const center = Math.round(frame);
+    let value = 0;
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const index = center + offset;
+      if (index >= 0 && index < envelope.length) value = Math.max(value, envelope[index]!);
+    }
+    return value;
+  };
+  let sum = 0;
+  let count = 0;
+  for (let start = 0; start + span <= envelope.length; start += span / 2) {
+    let bestSum = -1;
+    let bestCount = 0;
+    for (let phase = 0; phase < lagFrames; phase += 1) {
+      let windowSum = 0;
+      let windowCount = 0;
+      for (let frame = start + phase; frame < start + span; frame += lagFrames) {
+        windowSum += peak(frame);
+        windowCount += 1;
+      }
+      if (windowSum > bestSum) {
+        bestSum = windowSum;
+        bestCount = windowCount;
+      }
+    }
+    sum += bestSum;
+    count += bestCount;
+  }
+  return count ? sum / count / mean : 0;
+}
+
+/**
+ * Contrast gain a triple (×3/2, folded into the same octave) reading needs over the duple
+ * one, as the geometric mean over the tracking and full-band envelopes. Fitted on 104
+ * songs: the five songs whose beat is a triple of the autocorrelation peak score 1.09–1.42;
+ * the nearest duple songs stay under 1.05.
+ */
+const TRIPLE_CONTRAST_GAIN = 1.07;
+
+/** Fold a tempo into the octave [low, 2·low). */
+function foldIntoOctave(bpm: number, low: number): number {
+  while (bpm < low) bpm *= 2;
+  while (bpm >= low * 2) bpm /= 2;
+  return bpm;
+}
+
+/**
+ * Autocorrelation peaks at the strongest repetition, which for swung, dembow and half-time
+ * trap grooves is often two-thirds or four-thirds of the beat. Compare the grid sharpness of
+ * the duple reading against the triple one inside the same octave and switch when the
+ * triple grid is clearly sharper. The octave walk then picks the level.
+ */
+function resolveTripleFamily(bestBpm: number, envelopes: readonly Float32Array[], frameRate: number): number {
+  const duple = foldIntoOctave(bestBpm, 80);
+  const triple = foldIntoOctave(bestBpm * 1.5, 80);
+  let logGain = 0;
+  for (const envelope of envelopes)
+    logGain += Math.log(gridContrast(envelope, triple, frameRate) / Math.max(Number.EPSILON, gridContrast(envelope, duple, frameRate)));
+  return Math.exp(logGain / envelopes.length) >= TRIPLE_CONTRAST_GAIN ? bestBpm * 1.5 : bestBpm;
+}
+
+/**
  * Autocorrelation cannot tell a tempo from its double: both repeat. Kicks and snares can. At
  * the real beat they fill the beats and leave the half-beats light; at half speed the snares
  * land on the half-beats. Walk up the octave family from the slowest reading while the
@@ -519,7 +593,12 @@ export function trackBeats(
         return mid ? Float32Array.from(bass, (value, index) => value + mid[index]!) : bass;
       })()
     : envelope;
-  const octave = resolveOctave(best.bpm, octaveEnvelope, frameRate, minimumBpm, maximumBpm);
+  const familyBpm = resolveTripleFamily(
+    best.bpm,
+    options.broadbandEnvelope ? [envelope, options.broadbandEnvelope] : [envelope],
+    frameRate,
+  );
+  const octave = resolveOctave(familyBpm, octaveEnvelope, frameRate, minimumBpm, maximumBpm);
   const periodFrames = (60 * frameRate) / octave.bpm;
   const local = smoothEnvelope(envelope, periodFrames / 32);
   const segments = tempoSegments(envelope, periodFrames, frameRate);
