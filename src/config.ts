@@ -97,8 +97,12 @@ export type DifficultyProfile = Readonly<{
   movementWeight: number;
   /** Milliseconds of elapsed time that make one lane of travel comfortable. */
   travelMsPerLane: number;
-  /** Chords below this group strength collapse to a single note. */
+  /** Chords below this group strength collapse to a single note (Easy/Normal). */
   chordStrength: number;
+  /** Hard/Extreme: share of moments that become chords, picked by rhythmic weight. */
+  chordShare: number;
+  /** Hard/Extreme: share of moments (strongest downbeats) that become three-note chords. */
+  tripleChordShare: number;
   /** Repeated-pitch jacks are allowed when their spacing reaches this multiple of the lane gap. */
   jackGapMultiplier: number | null;
 }>;
@@ -112,6 +116,8 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     movementWeight: 0.95,
     travelMsPerLane: 160,
     chordStrength: Infinity,
+    chordShare: 0,
+    tripleChordShare: 0,
     jackGapMultiplier: null,
   },
   normal: {
@@ -122,6 +128,8 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     movementWeight: 0.55,
     travelMsPerLane: 125,
     chordStrength: 0.6,
+    chordShare: 0,
+    tripleChordShare: 0,
     jackGapMultiplier: null,
   },
   hard: {
@@ -132,6 +140,8 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     movementWeight: 0.38,
     travelMsPerLane: 90,
     chordStrength: 0.52,
+    chordShare: 0.28,
+    tripleChordShare: 0.03,
     jackGapMultiplier: 1.6,
   },
   extreme: {
@@ -142,6 +152,8 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     movementWeight: 0.3,
     travelMsPerLane: 80,
     chordStrength: 0.45,
+    chordShare: 0.38,
+    tripleChordShare: 0.05,
     jackGapMultiplier: 1.4,
   },
 });

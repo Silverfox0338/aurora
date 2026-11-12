@@ -37,6 +37,8 @@ type Moment = {
   role: MusicalEventRole;
   holdMs?: number;
   pattern: PatternKind;
+  /** Hard/Extreme only: rhythmic weight used to pick which moments become chords. */
+  chordScore?: number;
 };
 
 type BeamState = Readonly<{
@@ -61,6 +63,15 @@ const BEAM_WIDTH = 12;
 const BALANCE_HALF_LIFE_MS = 4_000;
 const PRIORITY_FLOOR = 0.2;
 const LEVEL_BONUS = [0.15, 0.08, 0.03, 0];
+/**
+ * Hard/Extreme chord score adjustments, fitted to hand-made rhythm-game charts, which chord ~63% of
+ * on-beat moments, ~36% of half-beats and ~26% of quarter-beats, and twice as often when the
+ * attack spans low, mid and high bands at once.
+ */
+const CHORD_LEVEL_BONUS = [0.12, 0, -0.1, -0.3];
+const CHORD_DOWNBEAT_BONUS = 0.1;
+const CHORD_BAND_BONUS = 0.1;
+const CHORD_TRIPLE_MARGIN = 0.35;
 
 function eventPriority(event: MusicalEvent, difficulty: ChartSettings["difficulty"]): number {
   const sustained =
@@ -138,6 +149,7 @@ function quantizeEvent(
 
 function buildMoments(quantized: readonly Quantized[], settings: ChartSettings, profile: DifficultyProfile) {
   const rules = DIFFICULTY_RULES[settings.difficulty];
+  const advanced = isAdvancedDifficulty(settings.difficulty) && rules.maximumChordSize >= 2;
   const sorted = [...quantized].sort(
     (left, right) => left.timeMs - right.timeMs || left.event.id.localeCompare(right.event.id),
   );
@@ -162,19 +174,32 @@ function buildMoments(quantized: readonly Quantized[], settings: ChartSettings, 
     for (const event of events) if (!distinct.some((item) => item.role === event.role)) distinct.push(event);
     const lead = events[0]!;
     const strength = Math.max(...events.map((event) => event.strength * 0.6 + event.confidence * 0.4));
-    let size = Math.min(rules.maximumChordSize, distinct.length);
-    if (size >= 2 && (strength < profile.chordStrength || anchor.level > 1)) size = 1;
-    if (size >= 3 && !(anchor.downbeat && strength >= 0.65)) size = 2;
-    // Accent doubling: a strong, broadband downbeat earns a chord even from a single attack.
-    if (
-      size === 1 &&
-      rules.maximumChordSize >= 2 &&
-      anchor.downbeat &&
-      lead.sourceBands.length >= 2 &&
-      strength >= profile.chordStrength + 0.25
-    )
-      size = 2;
-    reducedChords += Math.max(0, events.length - size);
+    let size = 1;
+    let chordScore = 0;
+    if (advanced) {
+      // Hard and Extreme chord like hand-made charts: by rhythmic weight and how full the hit is,
+      // not only when two different instruments land together. Moments stay single here;
+      // assignChords upgrades the top-scoring share once the density budget has chosen them.
+      const bands = new Set(events.flatMap((event) => event.sourceBands)).size;
+      chordScore =
+        strength +
+        (CHORD_LEVEL_BONUS[anchor.level] ?? -0.3) +
+        (anchor.downbeat ? CHORD_DOWNBEAT_BONUS : 0) +
+        (bands >= 3 ? CHORD_BAND_BONUS : bands === 2 ? CHORD_BAND_BONUS / 2 : 0);
+    } else {
+      size = Math.min(rules.maximumChordSize, distinct.length);
+      if (size >= 2 && (strength < profile.chordStrength || anchor.level > 1)) size = 1;
+      if (size >= 3 && !(anchor.downbeat && strength >= 0.65)) size = 2;
+      // Accent doubling: a strong, broadband downbeat earns a chord even from a single attack.
+      if (
+        size === 1 &&
+        rules.maximumChordSize >= 2 &&
+        anchor.downbeat &&
+        lead.sourceBands.length >= 2 &&
+        strength >= profile.chordStrength + 0.25
+      )
+        size = 2;
+    }
     const priority =
       Math.max(...events.map((event) => eventPriority(event, settings.difficulty))) +
       (LEVEL_BONUS[anchor.level] ?? 0) +
@@ -192,9 +217,53 @@ function buildMoments(quantized: readonly Quantized[], settings: ChartSettings, 
       ...(pitch !== undefined ? { pitch } : {}),
       role: lead.role,
       pattern: "free" as PatternKind,
+      chordScore,
     };
   });
+  for (const moment of moments) reducedChords += Math.max(0, moment.events.length - moment.size);
   return { moments, reducedChords };
+}
+
+/**
+ * Hard/Extreme: after the density budget has chosen the moments, the top-scoring share of them
+ * become chords and the strongest downbeats become triples, so every song gets the same chord share.
+ */
+function assignChords(moments: readonly Moment[], settings: ChartSettings, profile: DifficultyProfile): void {
+  const rules = DIFFICULTY_RULES[settings.difficulty];
+  if (!isAdvancedDifficulty(settings.difficulty) || rules.maximumChordSize < 2 || moments.length === 0) return;
+  const scores = moments.map((moment) => moment.chordScore ?? 0).sort((left, right) => left - right);
+  const quantile = (share: number) => scores[Math.min(scores.length - 1, Math.floor((1 - share) * scores.length))]!;
+  const doubleAt = profile.chordShare > 0 ? quantile(profile.chordShare) : Infinity;
+  const tripleAt = profile.tripleChordShare > 0 ? quantile(profile.tripleChordShare) : Infinity;
+  for (const moment of moments) {
+    const score = moment.chordScore ?? 0;
+    const size = moment.downbeat && score >= tripleAt ? 3 : score >= doubleAt ? 2 : 1;
+    moment.size = Math.min(rules.maximumChordSize, size);
+  }
+  // The peak cap ran on single notes; where chords push a one-second window over it (or over the
+  // quality check's per-lane-count limit, whichever is stricter), shrink the weakest chords in
+  // that window rather than dropping moments.
+  const cap = Math.max(
+    1,
+    Math.min(Math.round(profile.peakNotesPerSecond * settings.density), Math.max(12, settings.laneCount * 2.5)),
+  );
+  const sorted = [...moments].sort((left, right) => left.timeMs - right.timeMs);
+  let start = 0;
+  let notes = 0;
+  for (let index = 0; index < sorted.length; index += 1) {
+    notes += sorted[index]!.size;
+    while (sorted[index]!.timeMs - sorted[start]!.timeMs >= 1000) notes -= sorted[start++]!.size;
+    while (notes > cap) {
+      let weakest: Moment | undefined;
+      for (let probe = start; probe <= index; probe += 1) {
+        const moment = sorted[probe]!;
+        if (moment.size > 1 && (!weakest || (moment.chordScore ?? 0) < (weakest.chordScore ?? 0))) weakest = moment;
+      }
+      if (!weakest) break;
+      weakest.size -= 1;
+      notes -= 1;
+    }
+  }
 }
 
 /** Keep the strongest moments in each two-bar window until its notes-per-second budget is spent. */
@@ -225,8 +294,9 @@ function applyDensityBudget(
     const seconds = key < 1e6 ? (grid.intervalAt(key * beatsPerWindow) * beatsPerWindow) / 1000 : 4;
     const intensity = sectionAt(sections, startMs + seconds * 500)?.intensity ?? 0.5;
     const [quiet, loud] = profile.notesPerSecond;
+    const chordRoom = isAdvancedDifficulty(settings.difficulty) ? 1 + profile.chordShare + profile.tripleChordShare * 2 : 1;
     const target =
-      (quiet + (loud - quiet) * Math.max(0, Math.min(1, intensity))) * settings.density * seconds;
+      ((quiet + (loud - quiet) * Math.max(0, Math.min(1, intensity))) * settings.density * seconds) / chordRoom;
     const budget = target + carry;
     let used = 0;
     const ranked = [...candidates].sort(
@@ -755,6 +825,7 @@ function prepareMoments(
   }
   const { moments: rawMoments, reducedChords } = buildMoments(quantized, settings, profile);
   const budgeted = applyDensityBudget(rawMoments, grid, sections, profile, settings, removed);
+  assignChords(budgeted, settings, profile);
   const sortedEvents = [...events].sort((left, right) => left.timeMs - right.timeMs);
   const moments = assignHolds(budgeted, sortedEvents, grid, profile, settings, durationMs, removed);
   detectPatterns(moments, grid, profile, settings);
