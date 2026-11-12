@@ -6,6 +6,8 @@ export const AURORA_FEATURE_FLAGS = Object.freeze({
   hpssApproximation: true,
   slides: false,
   advancedDownbeats: true,
+  /** Track beats on the learned beat activation and label bars from the learned downbeat activation. */
+  learnedBeats: true,
   tempoMap: true,
 });
 
@@ -49,6 +51,10 @@ export const AURORA_CONFIG = Object.freeze({
       snare: 0.6,
       resync: 8,
     }),
+    /** With `learnedBeats`: re-sync cost when bar positions come from the learned downbeat activation. */
+    learnedDownbeatResync: 4,
+    /** With `learnedBeats`: share of the learned beat activation in the beat tracker's input. */
+    learnedBeatWeight: 0.6,
   }),
   holds: Object.freeze({
     minimumDurationMs: 420,

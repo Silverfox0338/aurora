@@ -16,6 +16,15 @@ export type BeatTrackingOptions = Readonly<{
   broadbandEnvelope?: Float32Array;
   /** Drum-free chroma, 12 values per frame; chord changes mark downbeats. */
   harmonicChroma?: Float32Array;
+  /** Learned downbeat probability per frame; when present it alone decides bar positions. */
+  downbeatActivation?: Float32Array;
+  /**
+   * Learned beat probability per frame. When present it picks the tempo and places the beats;
+   * tempo changes are still found on `envelope`, which follows gradual ramps better.
+   */
+  beatActivation?: Float32Array;
+  /** Share of the learned activation in the blend with the raw envelope (1 = learned only). */
+  beatActivationWeight?: number;
   tightness?: number;
 }>;
 
@@ -705,7 +714,18 @@ export function trackBeats(
   const frameRate = sampleRate / hopSize;
   const frameMs = 1000 / frameRate;
   const timeOffsetMs = options.timeOffsetMs ?? 0;
-  const candidates = scoreTempoCandidates(envelope, frameRate, minimumBpm, maximumBpm);
+  // The learned activation (when given) picks the tempo and places beats; tempo *changes* are
+  // still found on the raw envelope, which follows gradual ramps better.
+  const tracking = (() => {
+    if (!options.beatActivation) return envelope;
+    // Blend: the raw envelope anchors beats to real attacks (and keeps gradual ramps), the learned
+    // activation says which attacks are beats.
+    const weight = options.beatActivationWeight ?? AURORA_CONFIG.beat.learnedBeatWeight;
+    const raw = normalizedByMean(envelope);
+    const learned = normalizedByMean(options.beatActivation);
+    return Float32Array.from(raw, (value, index) => value * (1 - weight) + (learned[index] ?? 0) * weight);
+  })();
+  const candidates = scoreTempoCandidates(tracking, frameRate, minimumBpm, maximumBpm);
   const best = candidates[0];
   const periodicity = best ? Math.min(1, best.score / Math.max(Number.EPSILON, tempoPrior(best.bpm))) : 0;
   if (!best || periodicity < 0.08 || onsets.length === 0)
@@ -721,12 +741,12 @@ export function trackBeats(
     : envelope;
   const familyBpm = resolveTripleFamily(
     best.bpm,
-    options.broadbandEnvelope ? [envelope, options.broadbandEnvelope] : [envelope],
+    options.broadbandEnvelope ? [tracking, options.broadbandEnvelope] : [tracking],
     frameRate,
   );
   const octave = resolveOctave(familyBpm, octaveEnvelope, frameRate, minimumBpm, maximumBpm);
   const periodFrames = (60 * frameRate) / octave.bpm;
-  const local = smoothEnvelope(envelope, periodFrames / 32);
+  const local = smoothEnvelope(tracking, periodFrames / 32);
   const segments = tempoSegments(envelope, periodFrames, frameRate);
   const periods = new Float64Array(envelope.length);
   for (const segment of segments) periods.fill(segment.periodFrames, segment.startFrame, segment.endFrame);
@@ -776,6 +796,17 @@ export function trackBeats(
   });
   const { meter, phase } = estimateMeter(accents);
   const positions = (() => {
+    if (options.downbeatActivation) {
+      const activation = options.downbeatActivation;
+      const evidence = times.map((time) => envelopePeak(activation, Math.round((time - timeOffsetMs) / frameMs)));
+      const silent = evidence.map(() => 0);
+      return decodeBarPositions(meter, { chord: evidence, kick: silent, snare: silent }, {
+        chord: 1,
+        kick: 0,
+        snare: 0,
+        resync: AURORA_CONFIG.beat.learnedDownbeatResync,
+      });
+    }
     if (!AURORA_FEATURE_FLAGS.advancedDownbeats || !options.harmonicChroma)
       return times.map((_, index) => (((index - phase) % meter) + meter) % meter);
     return decodeBarPositions(meter, barFeatures(times, options, frameMs, timeOffsetMs), AURORA_CONFIG.beat.downbeat);

@@ -3,7 +3,8 @@ import { throwIfAborted } from "./audio.ts";
 
 import { prepareAnalysisChannels } from "./audio-prep.ts";
 import { trackBeats } from "./beat-tracking.ts";
-import { AURORA_CONFIG, AURORA_VERSION } from "./config.ts";
+import { beatActivation } from "./beat-model.ts";
+import { AURORA_CONFIG, AURORA_FEATURE_FLAGS, AURORA_VERSION } from "./config.ts";
 import { buildMusicalEvents } from "./event-builder.ts";
 import { detectOnsets } from "./onset-detection.ts";
 import { buildMelodySegments, stabilizePitchTrack } from "./pitch-tracking.ts";
@@ -51,6 +52,8 @@ export function analyzeAudio(audio: DecodedAudio, context: AnalysisContext = {})
     }),
   );
   report({ stage: "Tracking the beat", progress: 0.6 });
+  // A small learned model turns the band envelopes into beat/downbeat activations (beat-model.ts).
+  const learned = AURORA_FEATURE_FLAGS.learnedBeats ? timed("beat-model", () => beatActivation(spectrum.envelopes)) : undefined;
   const beatAnalysis = timed("beat-tracking", () =>
     trackBeats(
       spectrum.envelopes.percussive,
@@ -67,6 +70,7 @@ export function analyzeAudio(audio: DecodedAudio, context: AnalysisContext = {})
         midEnvelope: spectrum.envelopes.midrange,
         broadbandEnvelope: spectrum.envelopes.broadband,
         harmonicChroma: spectrum.harmonicChroma,
+        ...(learned ? { beatActivation: learned.beat, downbeatActivation: learned.downbeat } : {}),
       },
     ),
   );
