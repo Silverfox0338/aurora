@@ -39,6 +39,16 @@ export const AURORA_CONFIG = Object.freeze({
     /** Log2-Gaussian tempo prior centred on 120 BPM. */
     priorCenterBpm: 120,
     priorOctaveWidth: 0.9,
+    /**
+     * Downbeat decoding (`advancedDownbeats`): weights for chord change, kick and snare evidence,
+     * and the cost of re-syncing the bar position where the beat tracker slipped a beat.
+     */
+    downbeat: Object.freeze({
+      chord: 1,
+      kick: 0.6,
+      snare: 0.6,
+      resync: 8,
+    }),
   }),
   holds: Object.freeze({
     minimumDurationMs: 420,

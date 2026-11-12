@@ -1,4 +1,4 @@
-import { AURORA_CONFIG } from "./config.ts";
+import { AURORA_CONFIG, AURORA_FEATURE_FLAGS } from "./config.ts";
 import type { BeatMarker, OnsetEvent } from "./types.ts";
 
 export type TempoCandidate = Readonly<{ bpm: number; lagFrames: number; score: number }>;
@@ -14,6 +14,8 @@ export type BeatTrackingOptions = Readonly<{
   midEnvelope?: Float32Array;
   /** Full-band flux; with the tracking envelope it decides between duple and triple readings. */
   broadbandEnvelope?: Float32Array;
+  /** Drum-free chroma, 12 values per frame; chord changes mark downbeats. */
+  harmonicChroma?: Float32Array;
   tightness?: number;
 }>;
 
@@ -399,6 +401,130 @@ function estimateMeter(accents: readonly number[]): Readonly<{ meter: number; ph
   return { meter: 4, phase: quadruple.phase };
 }
 
+/** Robust z-score: centre on the median, scale by the median absolute deviation. */
+function robustZ(values: readonly number[]): number[] {
+  if (values.length === 0) return [];
+  const sorted = [...values].sort((a, b) => a - b);
+  const center = sorted[sorted.length >> 1]!;
+  const deviations = values.map((value) => Math.abs(value - center)).sort((a, b) => a - b);
+  const spread = Math.max(Number.EPSILON, deviations[deviations.length >> 1]! * 1.4826);
+  return values.map((value) => Math.max(-4, Math.min(4, (value - center) / spread)));
+}
+
+/**
+ * Harmonic change at each beat: cosine distance between the mean drum-free chroma of the two beats
+ * before it and the two beats from it. Chords change on downbeats far more often than mid-bar.
+ */
+function chromaNovelty(times: readonly number[], chroma: Float32Array, frameMs: number, timeOffsetMs: number): number[] {
+  const frameCount = Math.floor(chroma.length / 12);
+  const perBeat = times.map((time, index) => {
+    const start = Math.max(0, Math.round((time - timeOffsetMs) / frameMs));
+    const nextTime = times[index + 1] ?? time + (time - (times[index - 1] ?? time - 500));
+    const end = Math.min(frameCount, Math.max(start + 1, Math.round((nextTime - timeOffsetMs) / frameMs)));
+    const vector = new Float64Array(12);
+    for (let frame = start; frame < end; frame += 1)
+      for (let pc = 0; pc < 12; pc += 1) vector[pc] = vector[pc]! + (chroma[frame * 12 + pc] ?? 0);
+    return vector;
+  });
+  const span = (from: number, to: number) => {
+    const sum = new Float64Array(12);
+    for (let index = Math.max(0, from); index < Math.min(perBeat.length, to); index += 1)
+      for (let pc = 0; pc < 12; pc += 1) sum[pc] = sum[pc]! + perBeat[index]![pc]!;
+    return sum;
+  };
+  return times.map((_, index) => {
+    const before = span(index - 2, index);
+    const after = span(index, index + 2);
+    let dot = 0;
+    let normBefore = 0;
+    let normAfter = 0;
+    for (let pc = 0; pc < 12; pc += 1) {
+      dot += before[pc]! * after[pc]!;
+      normBefore += before[pc]! ** 2;
+      normAfter += after[pc]! ** 2;
+    }
+    if (normBefore <= Number.EPSILON || normAfter <= Number.EPSILON) return 0;
+    return 1 - dot / Math.sqrt(normBefore * normAfter);
+  });
+}
+
+/** Expected accent of each feature at each bar position (index 0 = downbeat). */
+const BAR_TEMPLATES: Readonly<Record<number, Readonly<{ chord: number[]; kick: number[]; snare: number[] }>>> = {
+  4: { chord: [1, -0.5, 0.25, -0.5], kick: [0.6, -0.4, 0.3, -0.4], snare: [-0.5, 0.5, -0.5, 0.5] },
+  3: { chord: [1, -0.5, -0.5], kick: [0.8, -0.4, -0.4], snare: [-0.4, 0.2, 0.2] },
+};
+
+/**
+ * Bar position of every beat by Viterbi decoding: each beat normally advances one position, but the
+ * path may re-sync (at a cost) where the beat tracker added or dropped a beat. Emissions match chord
+ * change, kick and snare accents against the meter's template.
+ */
+export function decodeBarPositions(
+  meter: number,
+  features: Readonly<{ chord: readonly number[]; kick: readonly number[]; snare: readonly number[] }>,
+  weights: Readonly<{ chord: number; kick: number; snare: number; resync: number }>,
+): number[] {
+  const template = BAR_TEMPLATES[meter] ?? BAR_TEMPLATES[4]!;
+  const count = features.chord.length;
+  if (count === 0) return [];
+  const chord = robustZ(features.chord);
+  const kick = robustZ(features.kick);
+  const snare = robustZ(features.snare);
+  const emission = (beat: number, position: number) =>
+    weights.chord * chord[beat]! * template.chord[position]! +
+    weights.kick * kick[beat]! * template.kick[position]! +
+    weights.snare * snare[beat]! * template.snare[position]!;
+  let scores = Array.from({ length: meter }, (_, position) => emission(0, position));
+  const back: Int8Array[] = [];
+  for (let beat = 1; beat < count; beat += 1) {
+    const from = new Int8Array(meter);
+    const next = new Array<number>(meter);
+    for (let position = 0; position < meter; position += 1) {
+      const advance = (position - 1 + meter) % meter;
+      let best = scores[advance]!;
+      let bestFrom = advance;
+      for (let previous = 0; previous < meter; previous += 1) {
+        if (previous === advance) continue;
+        const candidate = scores[previous]! - weights.resync;
+        if (candidate > best) {
+          best = candidate;
+          bestFrom = previous;
+        }
+      }
+      next[position] = best + emission(beat, position);
+      from[position] = bestFrom;
+    }
+    back.push(from);
+    scores = next;
+  }
+  const positions = new Array<number>(count);
+  let position = scores.indexOf(Math.max(...scores));
+  for (let beat = count - 1; beat >= 0; beat -= 1) {
+    positions[beat] = position;
+    if (beat > 0) position = back[beat - 1]![position]!;
+  }
+  return positions;
+}
+
+/** Per-beat downbeat evidence: chord change, kick (low band) and snare (mid band) accents. */
+export function barFeatures(
+  times: readonly number[],
+  options: BeatTrackingOptions,
+  frameMs: number,
+  timeOffsetMs: number,
+): Readonly<{ chord: number[]; kick: number[]; snare: number[] }> {
+  const bassMean = meanOf(options.bassEnvelope);
+  const midMean = meanOf(options.midEnvelope);
+  const frames = times.map((time) => Math.round((time - timeOffsetMs) / frameMs));
+  return {
+    chord: options.harmonicChroma
+      ? chromaNovelty(times, options.harmonicChroma, frameMs, timeOffsetMs)
+      : times.map(() => 0),
+    kick: frames.map((frame) => envelopePeak(options.bassEnvelope, frame) / bassMean),
+    snare: frames.map((frame) => envelopePeak(options.midEnvelope, frame) / midMean),
+  };
+}
+
 function normalizedByMean(envelope: Float32Array): Float32Array {
   const mean = meanOf(envelope);
   return Float32Array.from(envelope, (value) => value / mean);
@@ -649,11 +775,17 @@ export function trackBeats(
     );
   });
   const { meter, phase } = estimateMeter(accents);
+  const positions = (() => {
+    if (!AURORA_FEATURE_FLAGS.advancedDownbeats || !options.harmonicChroma)
+      return times.map((_, index) => (((index - phase) % meter) + meter) % meter);
+    return decodeBarPositions(meter, barFeatures(times, options, frameMs, timeOffsetMs), AURORA_CONFIG.beat.downbeat);
+  })();
 
+  // Pickup beats before the first downbeat are bar 0, as before.
+  let barIndex = 0;
   const beats: BeatMarker[] = times.map((timeMs, index) => {
-    const offset = index - phase;
-    const beatInBar = ((offset % meter) + meter) % meter;
-    const barIndex = Math.floor(offset / meter) + (phase > 0 ? 1 : 0);
+    const beatInBar = positions[index]!;
+    if (index > 0 && beatInBar === 0) barIndex += 1;
     return {
       timeMs,
       beatIndex: index,

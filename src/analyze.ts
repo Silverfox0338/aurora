@@ -66,6 +66,7 @@ export function analyzeAudio(audio: DecodedAudio, context: AnalysisContext = {})
         harmonicEnvelope: spectrum.envelopes.harmonic,
         midEnvelope: spectrum.envelopes.midrange,
         broadbandEnvelope: spectrum.envelopes.broadband,
+        harmonicChroma: spectrum.harmonicChroma,
       },
     ),
   );
