@@ -35,7 +35,7 @@ export const AURORA_CONFIG = Object.freeze({
     maximumBpm: 200,
     allowedSubdivisions: [1, 2, 3, 4] as const,
     /** Ellis-style DP transition tightness; larger values hold tempo more rigidly. */
-    tightness: 120,
+    tightness: 300,
     /** Log2-Gaussian tempo prior centred on 120 BPM. */
     priorCenterBpm: 120,
     priorOctaveWidth: 0.9,
