@@ -1,6 +1,6 @@
 import type { Difficulty } from "./chart.ts";
 
-export const AURORA_VERSION = "aurora-v3.0.0";
+export const AURORA_VERSION = "aurora-v3.1.0";
 
 export const AURORA_FEATURE_FLAGS = Object.freeze({
   hpssApproximation: true,

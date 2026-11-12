@@ -69,7 +69,7 @@ Everything the pipeline is built from is exported too: `analyzeSpectrum`, `detec
 
 ## Versioning
 
-`aurora.version` (`aurora-v3.0.0`) is recorded on every chart and is part of the seed. Any change that can alter output must bump `AURORA_VERSION` in `src/config.ts` and the package `version`, or saved charts and leaderboards stop matching.
+`aurora.version` (`aurora-v3.1.0`) is recorded on every chart and is part of the seed. Any change that can alter output must bump `AURORA_VERSION` in `src/config.ts` and the package `version`, or saved charts and leaderboards stop matching.
 
 ## Development
 

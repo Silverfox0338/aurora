@@ -1,6 +1,6 @@
 {
   "name": "@silverfox0338/aurora",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Aurora: deterministic audio analysis and rhythm-game chart generation from decoded PCM.",
   "license": "GPL-3.0-or-later",
   "keywords": [
