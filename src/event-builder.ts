@@ -172,12 +172,23 @@ export function buildMusicalEvents(
     if (attack && Math.abs(attack.timeMs - note.startMs) < 55) {
       // Melody notes often land with a snare or hat. A short note there stays a drum hit, but a
       // held note takes the attack over, or its hold would be lost to the drum.
-      const held = note.endMs - note.startMs >= AURORA_CONFIG.holds.minimumDurationMs;
+      const length = note.endMs - note.startMs;
+      const held = length >= AURORA_CONFIG.holds.minimumDurationMs;
       if (attack.endTimeMs === undefined && (held || (attack.role !== "hat" && attack.role !== "snare")))
         events[attackIndex] = {
           ...attack,
           endTimeMs: note.endMs,
           role: SUSTAINED_ROLES.has(attack.role) ? attack.role : note.midiPitch < 48 ? "bass" : "melody",
+          pitchMidi: note.midiPitch,
+          pitchConfidence: Math.max(attack.pitchConfidence ?? 0, note.confidence),
+          evidence: [...attack.evidence, "stable-pitch"],
+        };
+      else if (attack.endTimeMs === undefined && length >= AURORA_CONFIG.holds.shortMinimumMs)
+        // A short pitched note on a drum hit stays a drum hit, but remembers its sustain so
+        // Hard/Extreme can draw it as a short hold.
+        events[attackIndex] = {
+          ...attack,
+          endTimeMs: note.endMs,
           pitchMidi: note.midiPitch,
           pitchConfidence: Math.max(attack.pitchConfidence ?? 0, note.confidence),
           evidence: [...attack.evidence, "stable-pitch"],

@@ -372,14 +372,21 @@ function assignHolds(
   removed: Removal[],
 ): Moment[] {
   const rules = DIFFICULTY_RULES[settings.difficulty];
+  const longMinimum = Math.max(MIN_HOLD_DURATION_MS, AURORA_CONFIG.holds.minimumDurationMs);
+  const shortHolds = profile.shortHoldShare > 0;
   const candidates: Array<{ moment: Moment; durationMs: number; score: number }> = [];
+  const shortCandidates: Array<{ moment: Moment; durationMs: number; score: number }> = [];
   for (const moment of moments) {
     // A hold may share its moment with one tap; holding against two more notes is too much.
     if (moment.size > 2) continue;
     const event = moment.events.find((item) => item.endTimeMs !== undefined) ?? moment.lead;
     const start = findEventIndex(allEvents, event.timeMs);
     const end = findEventIndex(allEvents, event.endTimeMs ?? event.timeMs);
-    const raw = sustainedHoldDuration(event, allEvents.slice(start, end + 1));
+    const raw = sustainedHoldDuration(
+      event,
+      allEvents.slice(start, end + 1),
+      shortHolds ? AURORA_CONFIG.holds.shortMinimumMs : undefined,
+    );
     if (raw === undefined) continue;
     let endMs = moment.timeMs + raw;
     if (!grid.isEmpty) {
@@ -388,18 +395,26 @@ function assignHolds(
     }
     if (durationMs !== undefined) endMs = Math.min(endMs, durationMs - 30);
     const length = Math.min(MAX_HOLD_DURATION_MS, Math.round(endMs - moment.timeMs));
-    if (length < Math.max(MIN_HOLD_DURATION_MS, AURORA_CONFIG.holds.minimumDurationMs)) continue;
-    candidates.push({
-      moment,
-      durationMs: length,
-      score: (event.pitchConfidence ?? event.confidence) * Math.sqrt(length),
-    });
+    const candidate = { moment, durationMs: length, score: (event.pitchConfidence ?? event.confidence) * Math.sqrt(length) };
+    if (length >= longMinimum) candidates.push(candidate);
+    else if (shortHolds) {
+      const beatMs = grid.isEmpty ? 500 : grid.intervalAtTime(moment.timeMs);
+      const shortMinimum = Math.max(AURORA_CONFIG.holds.shortMinimumMs, AURORA_CONFIG.holds.shortMinimumBeats * beatMs);
+      if (length >= Math.max(MIN_HOLD_DURATION_MS, shortMinimum)) shortCandidates.push(candidate);
+    }
   }
+  const byScore = (left: (typeof candidates)[number], right: (typeof candidates)[number]) =>
+    right.score - left.score || left.moment.timeMs - right.moment.timeMs;
   const allowance = Math.max(1, Math.round(rules.holdFrequencyCap * moments.length));
   candidates
-    .sort((left, right) => right.score - left.score || left.moment.timeMs - right.moment.timeMs)
+    .sort(byScore)
     .slice(0, allowance)
     .forEach(({ moment, durationMs: length }) => (moment.holdMs = length));
+  if (shortHolds)
+    shortCandidates
+      .sort(byScore)
+      .slice(0, Math.round(profile.shortHoldShare * moments.length))
+      .forEach(({ moment, durationMs: length }) => (moment.holdMs = length));
   if (settings.difficulty !== "easy") return moments;
   // Easy charts rest while a hold is sustained instead of asking for a second hand.
   const kept: Moment[] = [];

@@ -12,9 +12,13 @@ const SUSTAINED_ROLES = new Set<MusicalEventRole>(["melody", "bass", "vocal", "h
 export function sustainedHoldDuration(
   event: MusicalEvent,
   futureEvents: readonly MusicalEvent[],
+  minimumMs: number = AURORA_CONFIG.holds.minimumDurationMs,
 ): number | undefined {
+  // Long holds need a sustained voice; a short hold may also start on a drum hit that carries a
+  // stable pitch (a sung or synth note landing with the snare).
+  const shortAllowed = minimumMs < AURORA_CONFIG.holds.minimumDurationMs && event.evidence.includes("stable-pitch");
   if (
-    !SUSTAINED_ROLES.has(event.role) ||
+    (!SUSTAINED_ROLES.has(event.role) && !shortAllowed) ||
     event.endTimeMs === undefined ||
     event.pitchMidi === undefined ||
     (event.pitchConfidence ?? event.confidence) < AURORA_CONFIG.pitch.confidenceThreshold
@@ -35,7 +39,7 @@ export function sustainedHoldDuration(
   );
   if (rearticulation) endTimeMs = rearticulation.timeMs - 90;
   const duration = Math.min(MAX_HOLD_DURATION_MS, Math.round(endTimeMs - event.timeMs));
-  return duration >= AURORA_CONFIG.holds.minimumDurationMs ? duration : undefined;
+  return duration >= minimumMs ? duration : undefined;
 }
 
 export type SustainEvidence = Readonly<{

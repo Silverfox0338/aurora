@@ -53,6 +53,13 @@ export const AURORA_CONFIG = Object.freeze({
   holds: Object.freeze({
     minimumDurationMs: 420,
     /**
+     * Hard/Extreme short holds: a pitched sustain this long (and at least `shortMinimumBeats` of a
+     * beat) may become a hold even though it is below `minimumDurationMs`. Hand-made rhythm-game
+     * charts put about half their holds on these half-beat sustains.
+     */
+    shortMinimumMs: 180,
+    shortMinimumBeats: 0.6,
+    /**
      * Measured against the recent median pitch, so vibrato stays inside one note. Below a
      * semitone (100 cents) so a step to the neighbouring note starts a new one.
      */
@@ -103,6 +110,8 @@ export type DifficultyProfile = Readonly<{
   chordShare: number;
   /** Hard/Extreme: share of moments (strongest downbeats) that become three-note chords. */
   tripleChordShare: number;
+  /** Share of moments that may carry a short hold (below `holds.minimumDurationMs`); 0 disables. */
+  shortHoldShare: number;
   /** Repeated-pitch jacks are allowed when their spacing reaches this multiple of the lane gap. */
   jackGapMultiplier: number | null;
 }>;
@@ -118,6 +127,7 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     chordStrength: Infinity,
     chordShare: 0,
     tripleChordShare: 0,
+    shortHoldShare: 0,
     jackGapMultiplier: null,
   },
   normal: {
@@ -130,6 +140,7 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     chordStrength: 0.6,
     chordShare: 0,
     tripleChordShare: 0,
+    shortHoldShare: 0,
     jackGapMultiplier: null,
   },
   hard: {
@@ -142,6 +153,7 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     chordStrength: 0.52,
     chordShare: 0.28,
     tripleChordShare: 0.03,
+    shortHoldShare: 0.1,
     jackGapMultiplier: 1.6,
   },
   extreme: {
@@ -154,6 +166,7 @@ export const AURORA_DIFFICULTY: Readonly<Record<Difficulty, DifficultyProfile>> 
     chordStrength: 0.45,
     chordShare: 0.38,
     tripleChordShare: 0.05,
+    shortHoldShare: 0.05,
     jackGapMultiplier: 1.4,
   },
 });

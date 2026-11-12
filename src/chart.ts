@@ -142,5 +142,5 @@ export const DIFFICULTY_RULES: Record<
   },
 };
 
-export const MIN_HOLD_DURATION_MS = 350;
+export const MIN_HOLD_DURATION_MS = 180;
 export const MAX_HOLD_DURATION_MS = 4000;
